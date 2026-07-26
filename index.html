@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+<title>Besici Takip</title>
+<meta name="description" content="Hayvan takip - kilo, aşı, sağlık ve gider kayıtları. İnternet gerektirmez." />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="Besici Takip" />
+<meta name="theme-color" content="#2f6f4f" />
+<link rel="icon" href="icons/icon-192.png" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <h1 id="page-title">Hayvanlarım</h1>
+    <button class="icon-btn" id="header-action" style="visibility:hidden">⋯</button>
+  </header>
+  <main id="view-root"></main>
+</div>
+
+<nav class="tabbar">
+  <button data-tab="animals"><span class="tab-icon">🐄</span>Hayvanlar</button>
+  <button data-tab="reminders"><span class="tab-icon">💉</span>Hatırlatıcı</button>
+  <button data-tab="summary"><span class="tab-icon">📊</span>Özet</button>
+  <button data-tab="settings"><span class="tab-icon">⚙️</span>Ayarlar</button>
+</nav>
+
+<div id="toast" class="toast"></div>
+<div id="modal-root"></div>
+
+<script src="app.js"></script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+</script>
+</body>
+</html>
