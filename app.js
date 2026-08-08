@@ -239,7 +239,16 @@ const state = {
   search: '',
   filter: 'hepsi',
   sort: 'giris_yeni',
+  moreScreen: null,
+  listingId: null,
+  postId: null,
+  marketSearch: '',
+  marketMineOnly: false,
+  communityMineOnly: false,
 };
+
+let currentUser = null;
+let currentUserProfile = null;
 
 const STATUS_LABEL = { aktif: 'Aktif', satildi: 'Satıldı', oldu: 'Öldü', kesildi: 'Kesildi' };
 const HEALTH_TYPE_LABEL = { hastalik: 'Hastalık', muayene: 'Muayene', tedavi: 'Tedavi' };
@@ -252,6 +261,11 @@ function setTitle(text) {
 function goTab(tab) {
   state.tab = tab;
   state.detailId = null;
+  state.listingId = null;
+  state.postId = null;
+  state.moreScreen = null;
+  state.marketMineOnly = false;
+  state.communityMineOnly = false;
   render();
 }
 
@@ -276,9 +290,49 @@ function render() {
     return;
   }
   if (state.tab === 'animals') renderAnimalsList(root);
-  else if (state.tab === 'reminders') renderReminders(root);
-  else if (state.tab === 'summary') renderSummary(root);
-  else if (state.tab === 'settings') renderSettings(root);
+  else if (state.tab === 'market') {
+    if (state.listingId !== null) renderListingDetail(root, state.listingId);
+    else renderMarket(root);
+  } else if (state.tab === 'community') {
+    if (state.postId !== null) renderPostDetail(root, state.postId);
+    else renderCommunity(root);
+  } else if (state.tab === 'account') renderAccount(root);
+  else if (state.tab === 'more') {
+    if (state.moreScreen === 'reminders') renderReminders(root);
+    else if (state.moreScreen === 'summary') renderSummary(root);
+    else if (state.moreScreen === 'settings') renderSettings(root);
+    else if (state.moreScreen === 'admin') renderAdmin(root);
+    else renderMoreMenu(root);
+  }
+}
+
+function goMore(screen) {
+  state.moreScreen = screen;
+  render();
+}
+
+function requireOnline(actionLabel) {
+  if (!window.firebaseReady) {
+    alert(`${actionLabel} için internet bağlantısı gerekiyor.`);
+    return false;
+  }
+  return true;
+}
+
+function requireLogin(actionLabel) {
+  if (!requireOnline(actionLabel)) return false;
+  if (!currentUser) {
+    alert(`${actionLabel} için giriş yapmalısın.`);
+    state.tab = 'account';
+    state.detailId = null;
+    render();
+    return false;
+  }
+  if (currentUserProfile && currentUserProfile.banned) {
+    alert('Hesabınız yönetici tarafından engellenmiş, bu işlemi yapamazsınız.');
+    return false;
+  }
+  return true;
 }
 
 /* ---------------- Animals list ---------------- */
@@ -331,7 +385,7 @@ function renderAnimalsList(root) {
           const w = latestWeightFor(a.id);
           const weightVal = w ? w.weight : a.entry_weight;
           const avatar = a.photo_uri
-            ? `<img src="${a.photo_uri}" alt="">`
+            ? `<img src="${a.photo_uri}" alt="" onclick="event.stopPropagation(); openPhotoLightbox('${a.photo_uri}')">`
             : '🐄';
           return `
         <div class="animal-card" onclick="openAnimal(${a.id})">
@@ -392,10 +446,10 @@ function renderReminders(root) {
   setTitle('Aşı Hatırlatıcıları');
   const items = upcomingVaccinations(60);
   if (!items.length) {
-    root.innerHTML = `<div class="empty-state"><strong>Yaklaşan aşı hatırlatıcısı yok</strong>Aşı kayıtlarına "sonraki doz tarihi" girdiğinizde burada görünecek.</div>`;
+    root.innerHTML = `${moreBackButton()}<div class="empty-state"><strong>Yaklaşan aşı hatırlatıcısı yok</strong>Aşı kayıtlarına "sonraki doz tarihi" girdiğinizde burada görünecek.</div>`;
     return;
   }
-  root.innerHTML = items
+  root.innerHTML = moreBackButton() + items
     .map((v) => {
       const remaining = daysUntil(v.next_date);
       const overdue = remaining < 0;
@@ -421,6 +475,7 @@ function renderSummary(root) {
   const s = farmSummary();
   const profit = s.totalSales - s.totalPurchases - s.totalExpenses;
   root.innerHTML = `
+    ${moreBackButton()}
     <div class="stat-grid">
       <div class="stat-card"><div class="stat-icon">🐄</div><div class="stat-value">${s.totalAnimals}</div><div class="stat-label">Toplam Hayvan</div></div>
       <div class="stat-card"><div class="stat-icon">✅</div><div class="stat-value">${s.activeAnimals}</div><div class="stat-label">Aktif</div></div>
@@ -448,6 +503,7 @@ function renderSummary(root) {
 function renderSettings(root) {
   setTitle('Ayarlar');
   root.innerHTML = `
+    ${moreBackButton()}
     <div class="card">
       <div style="font-weight:700; margin-bottom:8px;">☁️ Yedekleme</div>
       <div style="font-size:13px; color:var(--muted); line-height:1.5; margin-bottom:12px;">
@@ -525,6 +581,915 @@ function handleImportFile(e) {
   reader.readAsText(file);
 }
 
+/* ---------------- Shared helpers for online sections ---------------- */
+
+function moreBackButton() {
+  return `<button class="btn btn-ghost" style="margin-bottom:12px;" onclick="goMore(null)">← Geri</button>`;
+}
+
+function timeAgoOrDate(ts) {
+  if (!ts) return '';
+  const date = typeof ts.toDate === 'function' ? ts.toDate() : new Date(ts);
+  return formatDate(date.toISOString().slice(0, 10));
+}
+
+function resizeImageToBlob(file, maxDim, quality) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('read-failed'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('decode-failed'));
+      img.onload = () => {
+        let w = img.width;
+        let h = img.height;
+        if (w > h && w > maxDim) {
+          h = Math.round((h * maxDim) / w);
+          w = maxDim;
+        } else if (h >= w && h > maxDim) {
+          w = Math.round((w * maxDim) / h);
+          h = maxDim;
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('encode-failed'))), 'image/jpeg', quality);
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadPhoto(path, blob) {
+  const ref = storage.ref(path);
+  await ref.put(blob);
+  return ref.getDownloadURL();
+}
+
+/* ---------------- Gemini photo moderation ---------------- */
+
+const GEMINI_MODEL = 'gemini-2.0-flash';
+
+async function moderateAnimalPhoto(blob) {
+  if (typeof GEMINI_API_KEY === 'undefined' || !GEMINI_API_KEY) {
+    return { ok: true, skipped: true };
+  }
+  try {
+    const base64 = await blobToBase64(blob);
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: 'Bu fotoğrafta net şekilde bir çiftlik hayvanı (sığır, koyun, keçi, manda, tavuk vb.) görünüyor mu? Sadece tek kelimeyle cevap ver: EVET veya HAYIR.',
+              },
+              { inline_data: { mime_type: 'image/jpeg', data: base64 } },
+            ],
+          },
+        ],
+      }),
+    });
+    if (!res.ok) return { ok: true, skipped: true, error: `http_${res.status}` };
+    const data = await res.json();
+    const text = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim().toUpperCase();
+    if (text.includes('HAYIR')) return { ok: false };
+    return { ok: true };
+  } catch (e) {
+    return { ok: true, skipped: true, error: e.message };
+  }
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('read-failed'));
+    reader.onload = () => resolve(String(reader.result).split(',')[1]);
+    reader.readAsDataURL(blob);
+  });
+}
+
+/* ---------------- Auth / Account ---------------- */
+
+let isAdminUser = false;
+let accountFormMode = 'login';
+
+async function refreshCurrentUserProfile() {
+  if (!currentUser) {
+    currentUserProfile = null;
+    isAdminUser = false;
+    return;
+  }
+  try {
+    const [userSnap, adminSnap] = await Promise.all([
+      db.collection('users').doc(currentUser.uid).get(),
+      db.collection('admins').doc(currentUser.uid).get(),
+    ]);
+    currentUserProfile = userSnap.exists ? userSnap.data() : null;
+    isAdminUser = adminSnap.exists;
+  } catch (e) {
+    currentUserProfile = null;
+    isAdminUser = false;
+  }
+}
+
+function renderAccount(root) {
+  if (!window.firebaseReady) {
+    root.innerHTML = `<div class="empty-state"><strong>İnternet bağlantısı yok</strong>Hesap özellikleri için internete bağlanman gerekiyor.</div>`;
+    return;
+  }
+  if (currentUser) {
+    const p = currentUserProfile || {};
+    root.innerHTML = `
+      <div class="card">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <div class="avatar" style="width:56px;height:56px;border-radius:28px;font-size:24px;">👤</div>
+          <div style="flex:1;">
+            <div style="font-size:18px;font-weight:800;">${escapeHtml(p.displayName || currentUser.email)}</div>
+            <div style="font-size:12px;color:var(--muted);">${escapeHtml(currentUser.email)}</div>
+          </div>
+          ${isAdminUser ? '<div class="badge badge-aktif">Yönetici</div>' : ''}
+        </div>
+        <div style="height:1px;background:var(--border);margin:12px 0;"></div>
+        <div class="row"><span class="label">Telefon</span><span class="value">${escapeHtml(p.phone) || '-'}</span></div>
+        <div class="row"><span class="label">Şehir</span><span class="value">${escapeHtml(p.city) || '-'}</span></div>
+        <div class="btn-row" style="margin-top:14px;">
+          <button class="btn btn-secondary" onclick="openEditProfileForm()">Profili Düzenle</button>
+          <button class="btn btn-danger" onclick="logout()">Çıkış Yap</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="btn-row">
+          <button class="btn btn-ghost" onclick="state.tab='market'; state.marketMineOnly=true; render();">İlanlarım</button>
+          <button class="btn btn-ghost" onclick="state.tab='community'; state.communityMineOnly=true; render();">Gönderilerim</button>
+        </div>
+      </div>
+      ${isAdminUser ? `<div class="card"><button class="btn btn-primary" onclick="state.tab='more'; goMore('admin');">🛡️ Yönetici Paneli</button></div>` : ''}
+    `;
+    return;
+  }
+
+  root.innerHTML = `
+    <div class="chip-row">
+      <div class="chip ${accountFormMode === 'login' ? 'active' : ''}" onclick="accountFormMode='login'; render();">Giriş Yap</div>
+      <div class="chip ${accountFormMode === 'register' ? 'active' : ''}" onclick="accountFormMode='register'; render();">Kayıt Ol</div>
+    </div>
+    <div class="card">
+      ${accountFormMode === 'login' ? loginFormHtml() : registerFormHtml()}
+    </div>
+  `;
+}
+
+function loginFormHtml() {
+  return `
+    <label class="field"><span class="field-label">E-posta</span><input type="text" id="lf-email" placeholder="ornek@eposta.com"></label>
+    <label class="field"><span class="field-label">Şifre</span><input type="password" id="lf-password" placeholder="Şifreniz"></label>
+    <button class="btn btn-primary" onclick="submitLogin()">Giriş Yap</button>
+  `;
+}
+
+function registerFormHtml() {
+  return `
+    <label class="field"><span class="field-label">Ad Soyad / Kullanıcı Adı <span class="required">*</span></span><input type="text" id="rf-name" placeholder="Ör. Mehmet Yılmaz"></label>
+    <label class="field"><span class="field-label">Telefon</span><input type="text" id="rf-phone" placeholder="05xx xxx xx xx"></label>
+    <label class="field"><span class="field-label">Şehir</span><input type="text" id="rf-city" placeholder="Ör. Şanlıurfa"></label>
+    <label class="field"><span class="field-label">E-posta <span class="required">*</span></span><input type="text" id="rf-email" placeholder="ornek@eposta.com"></label>
+    <label class="field"><span class="field-label">Şifre <span class="required">*</span></span><input type="password" id="rf-password" placeholder="En az 6 karakter"></label>
+    <button class="btn btn-primary" onclick="submitRegister()">Kayıt Ol</button>
+  `;
+}
+
+async function submitLogin() {
+  const email = document.getElementById('lf-email').value.trim();
+  const password = document.getElementById('lf-password').value;
+  if (!email || !password) return alert('E-posta ve şifre zorunludur.');
+  try {
+    await auth.signInWithEmailAndPassword(email, password);
+    toast('Giriş yapıldı');
+  } catch (e) {
+    alert(loginErrorMessage(e));
+  }
+}
+
+function loginErrorMessage(e) {
+  const map = {
+    'auth/invalid-email': 'Geçersiz e-posta adresi.',
+    'auth/user-not-found': 'Bu e-posta ile kayıtlı kullanıcı bulunamadı.',
+    'auth/wrong-password': 'Şifre hatalı.',
+    'auth/invalid-credential': 'E-posta veya şifre hatalı.',
+    'auth/email-already-in-use': 'Bu e-posta zaten kayıtlı.',
+    'auth/weak-password': 'Şifre en az 6 karakter olmalı.',
+  };
+  return map[e.code] || 'Bir hata oluştu: ' + e.message;
+}
+
+async function submitRegister() {
+  const name = document.getElementById('rf-name').value.trim();
+  const phone = document.getElementById('rf-phone').value.trim();
+  const city = document.getElementById('rf-city').value.trim();
+  const email = document.getElementById('rf-email').value.trim();
+  const password = document.getElementById('rf-password').value;
+  if (!name || !email || !password) return alert('Ad, e-posta ve şifre zorunludur.');
+  try {
+    const cred = await auth.createUserWithEmailAndPassword(email, password);
+    await db.collection('users').doc(cred.user.uid).set({
+      displayName: name,
+      email,
+      phone: phone || null,
+      city: city || null,
+      banned: false,
+      muted: false,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+    toast('Kayıt tamamlandı, hoş geldin!');
+  } catch (e) {
+    alert(loginErrorMessage(e));
+  }
+}
+
+function logout() {
+  auth.signOut();
+  state.tab = 'animals';
+  render();
+}
+
+function openEditProfileForm() {
+  const p = currentUserProfile || {};
+  const body = `
+    <label class="field"><span class="field-label">Ad Soyad / Kullanıcı Adı</span><input type="text" id="ep-name" value="${escapeHtml(p.displayName || '')}"></label>
+    <label class="field"><span class="field-label">Telefon</span><input type="text" id="ep-phone" value="${escapeHtml(p.phone || '')}"></label>
+    <label class="field"><span class="field-label">Şehir</span><input type="text" id="ep-city" value="${escapeHtml(p.city || '')}"></label>
+    <button class="btn btn-primary" onclick="submitEditProfile()">Kaydet</button>
+  `;
+  openModal('Profili Düzenle', body);
+}
+
+async function submitEditProfile() {
+  const name = document.getElementById('ep-name').value.trim();
+  const phone = document.getElementById('ep-phone').value.trim();
+  const city = document.getElementById('ep-city').value.trim();
+  if (!name) return alert('Ad zorunludur.');
+  try {
+    await db.collection('users').doc(currentUser.uid).set(
+      { displayName: name, phone: phone || null, city: city || null },
+      { merge: true }
+    );
+    await refreshCurrentUserProfile();
+    closeModal();
+    toast('Profil güncellendi');
+    render();
+  } catch (e) {
+    alert('Hata: ' + e.message);
+  }
+}
+
+/* ---------------- Pazar Yeri (Marketplace) ---------------- */
+
+async function renderMarket(root) {
+  setTitle('Pazar Yeri');
+  if (!window.firebaseReady) {
+    root.innerHTML = `<div class="empty-state"><strong>İnternet bağlantısı yok</strong>Pazar Yeri için internete bağlanman gerekiyor.</div>`;
+    return;
+  }
+  root.innerHTML = `<div class="empty-state">Yükleniyor...</div>`;
+  try {
+    let query = db.collection('listings').orderBy('createdAt', 'desc').limit(100);
+    const snap = await query.get();
+    let listings = snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+    if (state.marketMineOnly && currentUser) {
+      listings = listings.filter((l) => l.sellerId === currentUser.uid);
+    }
+    if (state.marketSearch.trim()) {
+      const q = state.marketSearch.trim().toLowerCase();
+      listings = listings.filter(
+        (l) =>
+          (l.title || '').toLowerCase().includes(q) ||
+          (l.city || '').toLowerCase().includes(q) ||
+          (l.breed || '').toLowerCase().includes(q)
+      );
+    }
+
+    const cardsHtml = listings.length
+      ? listings
+          .map(
+            (l) => `
+        <div class="animal-card" onclick="openListing('${l.id}')">
+          <div class="top">
+            <div class="avatar">${l.photoUrl ? `<img src="${l.photoUrl}" alt="">` : '🐄'}</div>
+            <div class="info">
+              <div class="ear-tag">${escapeHtml(l.title)}</div>
+              <div class="name">${escapeHtml(l.city || '')}${l.breed ? ' · ' + escapeHtml(l.breed) : ''}</div>
+            </div>
+            ${l.status === 'sold' ? '<div class="badge badge-satildi">Satıldı</div>' : ''}
+          </div>
+          <div class="bottom">
+            <span>${escapeHtml(l.sellerName || '')}</span>
+            <span class="weight">${formatMoney(l.price)}</span>
+          </div>
+        </div>`
+          )
+          .join('')
+      : `<div class="empty-state"><strong>${state.marketMineOnly ? 'Henüz ilanın yok' : 'Henüz ilan yok'}</strong>${state.marketMineOnly ? '' : 'İlk ilanı sen ver!'}</div>`;
+
+    root.innerHTML = `
+      <div class="search-row">
+        <span>🔍</span>
+        <input id="market-search-input" type="text" placeholder="Hayvan, şehir veya ırk ara..." value="${escapeHtml(state.marketSearch)}">
+      </div>
+      ${
+        state.marketMineOnly
+          ? `<div class="chip-row"><div class="chip active" onclick="state.marketMineOnly=false; render();">Tüm ilanlar</div></div>`
+          : ''
+      }
+      ${cardsHtml}
+      <button class="fab" onclick="openListingForm()">+</button>
+    `;
+    const input = document.getElementById('market-search-input');
+    input.addEventListener('input', (e) => {
+      state.marketSearch = e.target.value;
+      renderMarket(root);
+    });
+  } catch (e) {
+    root.innerHTML = `<div class="empty-state"><strong>Yüklenemedi</strong>${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function openListing(id) {
+  state.listingId = id;
+  render();
+}
+
+async function renderListingDetail(root, id) {
+  setTitle('İlan');
+  root.innerHTML = `<div class="empty-state">Yükleniyor...</div>`;
+  try {
+    const doc = await db.collection('listings').doc(id).get();
+    if (!doc.exists) {
+      root.innerHTML = `<div class="empty-state"><strong>İlan bulunamadı</strong>Silinmiş olabilir.</div><button class="btn btn-ghost" onclick="state.listingId=null; render();">← Geri</button>`;
+      return;
+    }
+    const l = doc.data();
+    const isOwner = currentUser && l.sellerId === currentUser.uid;
+    const phoneDigits = (l.sellerPhone || '').replace(/\D/g, '');
+    root.innerHTML = `
+      <button class="btn btn-ghost" style="margin-bottom:12px;" onclick="state.listingId=null; render();">← Geri</button>
+      <div class="card">
+        ${l.photoUrl ? `<img src="${l.photoUrl}" style="width:100%;border-radius:12px;margin-bottom:12px;cursor:zoom-in;" onclick="openPhotoLightbox('${l.photoUrl}')">` : ''}
+        <div style="font-size:20px;font-weight:800;">${escapeHtml(l.title)}</div>
+        <div style="font-size:22px;font-weight:800;color:var(--primary-dark);margin-top:4px;">${formatMoney(l.price)}</div>
+        ${l.status === 'sold' ? '<div class="badge badge-satildi" style="margin-top:8px;">Satıldı</div>' : ''}
+        <div style="height:1px;background:var(--border);margin:12px 0;"></div>
+        <div class="row"><span class="label">Tür / Irk</span><span class="value">${escapeHtml(l.species || '')}${l.breed ? ' · ' + escapeHtml(l.breed) : ''}</span></div>
+        <div class="row"><span class="label">Ağırlık</span><span class="value">${l.weight ? formatWeight(l.weight) : '-'}</span></div>
+        <div class="row"><span class="label">Yaş</span><span class="value">${escapeHtml(l.age) || '-'}</span></div>
+        <div class="row"><span class="label">Şehir</span><span class="value">${escapeHtml(l.city) || '-'}</span></div>
+        ${l.description ? `<div class="row"><span class="label">Açıklama</span><span class="value">${escapeHtml(l.description)}</span></div>` : ''}
+        <div class="row"><span class="label">Satıcı</span><span class="value">${escapeHtml(l.sellerName || '')}</span></div>
+        <div class="row"><span class="label">Tarih</span><span class="value">${timeAgoOrDate(l.createdAt)}</span></div>
+      </div>
+      ${
+        phoneDigits
+          ? `<div class="btn-row">
+              <a class="btn btn-primary" style="text-decoration:none;" href="tel:${phoneDigits}">📞 Ara</a>
+              <a class="btn btn-secondary" style="text-decoration:none;" href="https://wa.me/${phoneDigits}" target="_blank" rel="noopener">💬 WhatsApp</a>
+            </div>`
+          : ''
+      }
+      ${
+        isOwner || isAdminUser
+          ? `<div class="btn-row" style="margin-top:10px;">
+              ${l.status !== 'sold' ? `<button class="btn btn-secondary" onclick="markListingSold('${id}')">Satıldı Olarak İşaretle</button>` : ''}
+              <button class="btn btn-danger" onclick="confirmDeleteListing('${id}')">Sil</button>
+            </div>`
+          : ''
+      }
+    `;
+  } catch (e) {
+    root.innerHTML = `<div class="empty-state"><strong>Yüklenemedi</strong>${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function markListingSold(id) {
+  try {
+    await db.collection('listings').doc(id).update({ status: 'sold' });
+    renderListingDetail(document.getElementById('view-root'), id);
+    toast('İlan satıldı olarak işaretlendi');
+  } catch (e) {
+    alert('Hata: ' + e.message);
+  }
+}
+
+function confirmDeleteListing(id) {
+  if (!confirmDialog('Bu ilanı silmek istiyor musunuz?')) return;
+  db.collection('listings')
+    .doc(id)
+    .delete()
+    .then(() => {
+      state.listingId = null;
+      toast('İlan silindi');
+      render();
+    })
+    .catch((e) => alert('Hata: ' + e.message));
+}
+
+function openListingForm() {
+  if (!requireLogin('İlan vermek')) return;
+  const p = currentUserProfile || {};
+  const trackedAnimals = listAnimals().filter((a) => a.status === 'aktif');
+  const body = `
+    ${
+      trackedAnimals.length
+        ? `<label class="field"><span class="field-label">Kayıtlı hayvanlarından doldur (opsiyonel)</span>
+      <select id="lf-from-animal" onchange="fillListingFromAnimal(this.value)">
+        <option value="">— Manuel gir —</option>
+        ${trackedAnimals.map((a) => `<option value="${a.id}">${escapeHtml(a.ear_tag)}${a.name ? ' · ' + escapeHtml(a.name) : ''}</option>`).join('')}
+      </select></label>`
+        : ''
+    }
+    <div class="photo-picker">
+      <button type="button" class="avatar-lg" id="lf-photo-btn" onclick="document.getElementById('lf-photo-input').click()">
+        <span id="lf-photo-preview-text">📷<br>Fotoğraf Ekle</span>
+      </button>
+      <input type="file" id="lf-photo-input" accept="image/*" capture="environment" class="hidden">
+    </div>
+    <label class="field"><span class="field-label">Başlık <span class="required">*</span></span><input type="text" id="lf-title" placeholder="Ör. Simmental Dişi Dana"></label>
+    <label class="field"><span class="field-label">Tür</span>
+      <select id="lf-species">${SPECIES_OPTIONS.map((s) => `<option value="${s}">${s}</option>`).join('')}</select>
+    </label>
+    <label class="field"><span class="field-label">Irk</span><input type="text" id="lf-breed" placeholder="Ör. Simmental"></label>
+    <label class="field"><span class="field-label">Ağırlık (kg)</span><input type="number" step="0.1" id="lf-weight" placeholder="Ör. 350"></label>
+    <label class="field"><span class="field-label">Yaş</span><input type="text" id="lf-age" placeholder="Ör. 8 aylık"></label>
+    <label class="field"><span class="field-label">Fiyat (₺) <span class="required">*</span></span><input type="number" step="0.01" id="lf-price" placeholder="Ör. 65000"></label>
+    <label class="field"><span class="field-label">Şehir</span><input type="text" id="lf-city" value="${escapeHtml(p.city || '')}" placeholder="Ör. Şanlıurfa"></label>
+    <label class="field"><span class="field-label">Açıklama</span><textarea id="lf-description" placeholder="Detaylar, sağlık durumu vb."></textarea></label>
+    <button class="btn btn-primary" id="lf-submit-btn" onclick="submitListingForm()">İlanı Yayınla</button>
+  `;
+  openModal('Yeni İlan', body, () => {
+    document.getElementById('lf-photo-input').addEventListener('change', handleListingPhotoInput);
+  });
+}
+
+let pendingListingPhotoBlob = null;
+
+function fillListingFromAnimal(animalId) {
+  if (!animalId) return;
+  const a = getAnimal(Number(animalId));
+  if (!a) return;
+  document.getElementById('lf-title').value = `${a.breed || a.species} ${a.name ? '· ' + a.name : ''}`.trim();
+  document.getElementById('lf-species').value = a.species;
+  document.getElementById('lf-breed').value = a.breed || '';
+  const w = latestWeightFor(a.id);
+  document.getElementById('lf-weight').value = w ? w.weight : a.entry_weight || '';
+  if (a.photo_uri) {
+    document.getElementById('lf-photo-btn').innerHTML = `<img src="${a.photo_uri}">`;
+    fetch(a.photo_uri)
+      .then((r) => r.blob())
+      .then((b) => (pendingListingPhotoBlob = b));
+  }
+}
+
+async function handleListingPhotoInput(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const blob = await resizeImageToBlob(file, 800, 0.75);
+    pendingListingPhotoBlob = blob;
+    const url = URL.createObjectURL(blob);
+    document.getElementById('lf-photo-btn').innerHTML = `<img src="${url}">`;
+  } catch (err) {
+    alert('Fotoğraf işlenemedi.');
+  }
+}
+
+async function submitListingForm() {
+  const title = document.getElementById('lf-title').value.trim();
+  const price = toNumberOrNull(document.getElementById('lf-price').value);
+  if (!title) return alert('Başlık zorunludur.');
+  if (price === null) return alert('Geçerli bir fiyat girin.');
+
+  const btn = document.getElementById('lf-submit-btn');
+  btn.textContent = 'Yayınlanıyor...';
+  btn.disabled = true;
+
+  try {
+    if (pendingListingPhotoBlob) {
+      const check = await moderateAnimalPhoto(pendingListingPhotoBlob);
+      if (!check.ok) {
+        alert('Yüklediğin fotoğrafta bir hayvan tespit edilemedi. Lütfen hayvanın net görüldüğü bir fotoğraf seç.');
+        btn.textContent = 'İlanı Yayınla';
+        btn.disabled = false;
+        return;
+      }
+    }
+
+    const docRef = await db.collection('listings').add({
+      sellerId: currentUser.uid,
+      sellerName: (currentUserProfile && currentUserProfile.displayName) || currentUser.email,
+      sellerPhone: (currentUserProfile && currentUserProfile.phone) || null,
+      title,
+      species: document.getElementById('lf-species').value,
+      breed: document.getElementById('lf-breed').value.trim() || null,
+      weight: toNumberOrNull(document.getElementById('lf-weight').value),
+      age: document.getElementById('lf-age').value.trim() || null,
+      price,
+      city: document.getElementById('lf-city').value.trim() || null,
+      description: document.getElementById('lf-description').value.trim() || null,
+      photoUrl: null,
+      status: 'active',
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+
+    if (pendingListingPhotoBlob) {
+      const url = await uploadPhoto(`listings/${docRef.id}/photo.jpg`, pendingListingPhotoBlob);
+      await docRef.update({ photoUrl: url });
+    }
+
+    pendingListingPhotoBlob = null;
+    closeModal();
+    toast('İlan yayınlandı');
+    openListing(docRef.id);
+  } catch (e) {
+    alert('Hata: ' + e.message);
+    btn.textContent = 'İlanı Yayınla';
+    btn.disabled = false;
+  }
+}
+
+/* ---------------- Topluluk (Community) ---------------- */
+
+async function renderCommunity(root) {
+  setTitle('Topluluk');
+  if (!window.firebaseReady) {
+    root.innerHTML = `<div class="empty-state"><strong>İnternet bağlantısı yok</strong>Topluluk için internete bağlanman gerekiyor.</div>`;
+    return;
+  }
+  root.innerHTML = `<div class="empty-state">Yükleniyor...</div>`;
+  try {
+    const snap = await db.collection('posts').orderBy('createdAt', 'desc').limit(100).get();
+    let posts = snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+    if (state.communityMineOnly && currentUser) {
+      posts = posts.filter((p) => p.authorId === currentUser.uid);
+    }
+
+    const html = posts.length
+      ? posts
+          .map(
+            (p) => `
+        <div class="card" style="cursor:pointer;" onclick="openPost('${p.id}')">
+          <div style="display:flex; gap:10px;">
+            ${p.photoUrl ? `<img src="${p.photoUrl}" style="width:56px;height:56px;border-radius:10px;object-fit:cover;flex-shrink:0;">` : ''}
+            <div style="flex:1; min-width:0;">
+              <div style="font-weight:700; font-size:15px;">${escapeHtml(p.title)}</div>
+              <div style="font-size:12px;color:var(--muted);margin-top:2px;">${escapeHtml(p.authorName || '')} · ${timeAgoOrDate(p.createdAt)}</div>
+              <div style="font-size:13px;color:var(--muted);margin-top:6px; overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;">${escapeHtml(p.body || '')}</div>
+              <div style="font-size:12px;color:var(--primary-dark);margin-top:6px;font-weight:600;">💬 ${p.commentCount || 0} yorum</div>
+            </div>
+          </div>
+        </div>`
+          )
+          .join('')
+      : `<div class="empty-state"><strong>${state.communityMineOnly ? 'Henüz gönderin yok' : 'Henüz gönderi yok'}</strong>${state.communityMineOnly ? '' : 'Hayvanınla ilgili bir soru veya durum paylaşabilirsin.'}</div>`;
+
+    root.innerHTML = `
+      ${
+        state.communityMineOnly
+          ? `<div class="chip-row"><div class="chip active" onclick="state.communityMineOnly=false; render();">Tüm gönderiler</div></div>`
+          : ''
+      }
+      ${html}
+      <button class="fab" onclick="openPostForm()">+</button>
+    `;
+  } catch (e) {
+    root.innerHTML = `<div class="empty-state"><strong>Yüklenemedi</strong>${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function openPost(id) {
+  state.postId = id;
+  render();
+}
+
+async function renderPostDetail(root, id) {
+  setTitle('Gönderi');
+  root.innerHTML = `<div class="empty-state">Yükleniyor...</div>`;
+  try {
+    const [postDoc, commentsSnap] = await Promise.all([
+      db.collection('posts').doc(id).get(),
+      db.collection('posts').doc(id).collection('comments').orderBy('createdAt', 'asc').get(),
+    ]);
+    if (!postDoc.exists) {
+      root.innerHTML = `<div class="empty-state"><strong>Gönderi bulunamadı</strong></div><button class="btn btn-ghost" onclick="state.postId=null; render();">← Geri</button>`;
+      return;
+    }
+    const p = postDoc.data();
+    const isOwner = currentUser && p.authorId === currentUser.uid;
+    const comments = commentsSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+
+    root.innerHTML = `
+      <button class="btn btn-ghost" style="margin-bottom:12px;" onclick="state.postId=null; render();">← Geri</button>
+      <div class="card">
+        ${p.photoUrl ? `<img src="${p.photoUrl}" style="width:100%;border-radius:12px;margin-bottom:12px;cursor:zoom-in;" onclick="openPhotoLightbox('${p.photoUrl}')">` : ''}
+        <div style="font-size:18px;font-weight:800;">${escapeHtml(p.title)}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:4px;">${escapeHtml(p.authorName || '')} · ${timeAgoOrDate(p.createdAt)}</div>
+        <div style="font-size:14px;margin-top:10px;white-space:pre-wrap;">${escapeHtml(p.body || '')}</div>
+        ${
+          isOwner || isAdminUser
+            ? `<div class="btn-row" style="margin-top:14px;"><button class="btn btn-danger" onclick="confirmDeletePost('${id}')">Gönderiyi Sil</button></div>`
+            : ''
+        }
+      </div>
+      <div class="card">
+        <div class="section-title-row"><h3>Yorumlar (${comments.length})</h3></div>
+        ${
+          comments.length
+            ? comments
+                .map(
+                  (c) => `
+          <div class="list-row">
+            <div class="body">
+              <div class="title">${escapeHtml(c.authorName || '')}</div>
+              <div class="subtitle">${timeAgoOrDate(c.createdAt)}</div>
+              <div class="note" style="font-style:normal;margin-top:4px;">${escapeHtml(c.body)}</div>
+            </div>
+            ${
+              (currentUser && c.authorId === currentUser.uid) || isAdminUser
+                ? `<button class="delete-btn" onclick="confirmDeleteComment('${id}','${c.id}')">🗑</button>`
+                : ''
+            }
+          </div>`
+                )
+                .join('')
+            : '<div class="empty-state">Henüz yorum yok</div>'
+        }
+        ${
+          currentUser
+            ? `<div style="margin-top:12px;">
+                <textarea id="comment-input" placeholder="Yorum yaz..." style="min-height:60px;"></textarea>
+                <button class="btn btn-primary" style="margin-top:8px;" onclick="submitComment('${id}')">Gönder</button>
+              </div>`
+            : `<div style="margin-top:12px;font-size:13px;color:var(--muted);">Yorum yapmak için <a href="#" onclick="state.tab='account'; state.postId=null; render(); return false;">giriş yap</a>.</div>`
+        }
+      </div>
+    `;
+  } catch (e) {
+    root.innerHTML = `<div class="empty-state"><strong>Yüklenemedi</strong>${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function confirmDeletePost(id) {
+  if (!confirmDialog('Bu gönderiyi silmek istiyor musunuz?')) return;
+  db.collection('posts')
+    .doc(id)
+    .delete()
+    .then(() => {
+      state.postId = null;
+      toast('Gönderi silindi');
+      render();
+    })
+    .catch((e) => alert('Hata: ' + e.message));
+}
+
+function confirmDeleteComment(postId, commentId) {
+  if (!confirmDialog('Bu yorumu silmek istiyor musunuz?')) return;
+  db.collection('posts')
+    .doc(postId)
+    .collection('comments')
+    .doc(commentId)
+    .delete()
+    .then(() => {
+      db.collection('posts')
+        .doc(postId)
+        .update({ commentCount: firebase.firestore.FieldValue.increment(-1) })
+        .catch(() => {});
+      renderPostDetail(document.getElementById('view-root'), postId);
+    })
+    .catch((e) => alert('Hata: ' + e.message));
+}
+
+async function submitComment(postId) {
+  const body = document.getElementById('comment-input').value.trim();
+  if (!body) return;
+  try {
+    await db.collection('posts').doc(postId).collection('comments').add({
+      authorId: currentUser.uid,
+      authorName: (currentUserProfile && currentUserProfile.displayName) || currentUser.email,
+      body,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+    await db
+      .collection('posts')
+      .doc(postId)
+      .update({ commentCount: firebase.firestore.FieldValue.increment(1) });
+    renderPostDetail(document.getElementById('view-root'), postId);
+  } catch (e) {
+    alert('Hata: ' + e.message);
+  }
+}
+
+let pendingPostPhotoBlob = null;
+
+function openPostForm() {
+  if (!requireLogin('Gönderi paylaşmak')) return;
+  pendingPostPhotoBlob = null;
+  const body = `
+    <div class="photo-picker">
+      <button type="button" class="avatar-lg" id="pf-photo-btn" onclick="document.getElementById('pf-photo-input').click()">
+        <span>📷<br>Fotoğraf Ekle (opsiyonel)</span>
+      </button>
+      <input type="file" id="pf-photo-input" accept="image/*" capture="environment" class="hidden">
+    </div>
+    <label class="field"><span class="field-label">Başlık <span class="required">*</span></span><input type="text" id="pf-title" placeholder="Ör. Buzağımda topallık var"></label>
+    <label class="field"><span class="field-label">Açıklama <span class="required">*</span></span><textarea id="pf-body" placeholder="Durumu detaylandır..."></textarea></label>
+    <button class="btn btn-primary" id="pf-submit-btn" onclick="submitPostForm()">Paylaş</button>
+  `;
+  openModal('Yeni Gönderi', body, () => {
+    document.getElementById('pf-photo-input').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      try {
+        pendingPostPhotoBlob = await resizeImageToBlob(file, 800, 0.75);
+        const url = URL.createObjectURL(pendingPostPhotoBlob);
+        document.getElementById('pf-photo-btn').innerHTML = `<img src="${url}">`;
+      } catch {
+        alert('Fotoğraf işlenemedi.');
+      }
+    });
+  });
+}
+
+async function submitPostForm() {
+  const title = document.getElementById('pf-title').value.trim();
+  const body = document.getElementById('pf-body').value.trim();
+  if (!title || !body) return alert('Başlık ve açıklama zorunludur.');
+
+  const btn = document.getElementById('pf-submit-btn');
+  btn.textContent = 'Paylaşılıyor...';
+  btn.disabled = true;
+
+  try {
+    if (pendingPostPhotoBlob) {
+      const check = await moderateAnimalPhoto(pendingPostPhotoBlob);
+      if (!check.ok) {
+        alert('Yüklediğin fotoğrafta bir hayvan tespit edilemedi. Lütfen hayvanın net görüldüğü bir fotoğraf seç.');
+        btn.textContent = 'Paylaş';
+        btn.disabled = false;
+        return;
+      }
+    }
+
+    const docRef = await db.collection('posts').add({
+      authorId: currentUser.uid,
+      authorName: (currentUserProfile && currentUserProfile.displayName) || currentUser.email,
+      title,
+      body,
+      photoUrl: null,
+      commentCount: 0,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+
+    if (pendingPostPhotoBlob) {
+      const url = await uploadPhoto(`posts/${docRef.id}/photo.jpg`, pendingPostPhotoBlob);
+      await docRef.update({ photoUrl: url });
+    }
+
+    pendingPostPhotoBlob = null;
+    closeModal();
+    toast('Gönderi paylaşıldı');
+    openPost(docRef.id);
+  } catch (e) {
+    alert('Hata: ' + e.message);
+    btn.textContent = 'Paylaş';
+    btn.disabled = false;
+  }
+}
+
+/* ---------------- More menu ---------------- */
+
+function renderMoreMenu(root) {
+  setTitle('Diğer');
+  root.innerHTML = `
+    <div class="card" style="padding:0; overflow:hidden;">
+      <div class="list-row" style="border-top:none; padding:14px 16px; cursor:pointer;" onclick="goMore('reminders')">
+        <div class="body"><div class="title">💉 Aşı Hatırlatıcıları</div></div>
+      </div>
+      <div class="list-row" style="padding:14px 16px; cursor:pointer;" onclick="goMore('summary')">
+        <div class="body"><div class="title">📊 Çiftlik Özeti</div></div>
+      </div>
+      <div class="list-row" style="padding:14px 16px; cursor:pointer;" onclick="goMore('settings')">
+        <div class="body"><div class="title">⚙️ Ayarlar / Yedekleme</div></div>
+      </div>
+      ${
+        isAdminUser
+          ? `<div class="list-row" style="padding:14px 16px; cursor:pointer;" onclick="goMore('admin')">
+              <div class="body"><div class="title">🛡️ Yönetici Paneli</div></div>
+            </div>`
+          : ''
+      }
+    </div>
+  `;
+}
+
+/* ---------------- Admin panel ---------------- */
+
+async function renderAdmin(root) {
+  setTitle('Yönetici Paneli');
+  if (!isAdminUser) {
+    root.innerHTML = `${moreBackButton()}<div class="empty-state"><strong>Yetkisiz</strong>Bu sayfayı görüntüleme yetkin yok.</div>`;
+    return;
+  }
+  root.innerHTML = `${moreBackButton()}<div class="empty-state">Yükleniyor...</div>`;
+  try {
+    const [usersSnap, listingsSnap, postsSnap] = await Promise.all([
+      db.collection('users').orderBy('createdAt', 'desc').limit(200).get(),
+      db.collection('listings').orderBy('createdAt', 'desc').limit(200).get(),
+      db.collection('posts').orderBy('createdAt', 'desc').limit(200).get(),
+    ]);
+    const users = usersSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+    const listings = listingsSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+    const posts = postsSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+
+    root.innerHTML = `
+      ${moreBackButton()}
+      <div class="card">
+        <div class="section-title-row"><h3>Kullanıcılar (${users.length})</h3></div>
+        ${users
+          .map(
+            (u) => `
+          <div class="list-row">
+            <div class="body">
+              <div class="title">${escapeHtml(u.displayName || u.email)} ${u.banned ? '<span class="badge badge-oldu">Engelli</span>' : ''} ${u.muted ? '<span class="badge badge-kesildi">Susturulmuş</span>' : ''}</div>
+              <div class="subtitle">${escapeHtml(u.email || '')} · ${escapeHtml(u.city || '')}</div>
+            </div>
+            <div style="display:flex; gap:6px;">
+              <button class="delete-btn" style="font-size:12px;" onclick="toggleUserFlag('${u.id}','banned',${!u.banned})">${u.banned ? 'Engeli Kaldır' : 'Engelle'}</button>
+              <button class="delete-btn" style="font-size:12px;" onclick="toggleUserFlag('${u.id}','muted',${!u.muted})">${u.muted ? 'Sesi Aç' : 'Sustur'}</button>
+            </div>
+          </div>`
+          )
+          .join('')}
+      </div>
+      <div class="card">
+        <div class="section-title-row"><h3>İlanlar (${listings.length})</h3></div>
+        ${listings
+          .map(
+            (l) => `
+          <div class="list-row">
+            <div class="body"><div class="title">${escapeHtml(l.title)}</div><div class="subtitle">${escapeHtml(l.sellerName || '')} · ${formatMoney(l.price)}</div></div>
+            <button class="delete-btn" onclick="adminDeleteListing('${l.id}')">🗑</button>
+          </div>`
+          )
+          .join('')}
+      </div>
+      <div class="card">
+        <div class="section-title-row"><h3>Gönderiler (${posts.length})</h3></div>
+        ${posts
+          .map(
+            (p) => `
+          <div class="list-row">
+            <div class="body"><div class="title">${escapeHtml(p.title)}</div><div class="subtitle">${escapeHtml(p.authorName || '')}</div></div>
+            <button class="delete-btn" onclick="adminDeletePost('${p.id}')">🗑</button>
+          </div>`
+          )
+          .join('')}
+      </div>
+    `;
+  } catch (e) {
+    root.innerHTML = `${moreBackButton()}<div class="empty-state"><strong>Yüklenemedi</strong>${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function toggleUserFlag(uid, field, value) {
+  try {
+    await db.collection('users').doc(uid).update({ [field]: value });
+    renderAdmin(document.getElementById('view-root'));
+  } catch (e) {
+    alert('Hata: ' + e.message);
+  }
+}
+
+function adminDeleteListing(id) {
+  if (!confirmDialog('Bu ilanı silmek istiyor musunuz?')) return;
+  db.collection('listings')
+    .doc(id)
+    .delete()
+    .then(() => renderAdmin(document.getElementById('view-root')))
+    .catch((e) => alert('Hata: ' + e.message));
+}
+
+function adminDeletePost(id) {
+  if (!confirmDialog('Bu gönderiyi silmek istiyor musunuz?')) return;
+  db.collection('posts')
+    .doc(id)
+    .delete()
+    .then(() => renderAdmin(document.getElementById('view-root')))
+    .catch((e) => alert('Hata: ' + e.message));
+}
+
 /* ---------------- Animal detail ---------------- */
 
 function renderDetail(root, id) {
@@ -556,7 +1521,7 @@ function renderDetail(root, id) {
 
     <div class="card">
       <div style="display:flex; align-items:center; gap:12px;">
-        <div class="avatar" style="width:56px;height:56px;border-radius:28px;font-size:26px;">${animal.photo_uri ? `<img src="${animal.photo_uri}">` : '🐄'}</div>
+        <div class="avatar" style="width:56px;height:56px;border-radius:28px;font-size:26px;">${animal.photo_uri ? `<img src="${animal.photo_uri}" onclick="event.stopPropagation(); openPhotoLightbox('${animal.photo_uri}')">` : '🐄'}</div>
         <div style="flex:1;">
           <div style="font-size:22px;font-weight:800;">${escapeHtml(animal.ear_tag)}</div>
           ${animal.name ? `<div style="font-size:14px;color:var(--muted);">${escapeHtml(animal.name)}</div>` : ''}
@@ -722,6 +1687,15 @@ function openModal(title, bodyHtml, onMount) {
 
 function closeModal() {
   document.getElementById('modal-root').innerHTML = '';
+}
+
+function openPhotoLightbox(uri) {
+  const root = document.getElementById('modal-root');
+  root.innerHTML = `
+    <div class="lightbox-overlay" id="lightbox-overlay" onclick="closeModal()">
+      <img src="${uri}" class="lightbox-img">
+    </div>
+  `;
 }
 
 /* ---------------- Animal form ---------------- */
@@ -1048,3 +2022,13 @@ document.querySelectorAll('nav.tabbar button').forEach((btn) => {
 });
 
 render();
+
+if (window.firebaseReady && typeof auth !== 'undefined' && auth) {
+  auth.onAuthStateChanged(async (user) => {
+    currentUser = user;
+    await refreshCurrentUserProfile();
+    if (['account', 'market', 'community'].includes(state.tab) || state.moreScreen === 'admin') {
+      render();
+    }
+  });
+}
