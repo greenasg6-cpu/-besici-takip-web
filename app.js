@@ -943,6 +943,7 @@ async function renderMarket(root) {
 }
 
 function openListing(id) {
+  state.tab = 'market';
   state.listingId = id;
   render();
 }
@@ -1193,6 +1194,7 @@ async function renderCommunity(root) {
 }
 
 function openPost(id) {
+  state.tab = 'community';
   state.postId = id;
   render();
 }

@@ -23,8 +23,15 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if true;
-      allow create: if isSignedIn() && request.auth.uid == userId;
-      allow update: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow create: if isSignedIn() && request.auth.uid == userId
+                    && request.resource.data.banned == false
+                    && request.resource.data.muted == false;
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        (request.auth.uid == userId
+          && request.resource.data.banned == resource.data.banned
+          && request.resource.data.muted == resource.data.muted)
+      );
       allow delete: if false;
     }
 
