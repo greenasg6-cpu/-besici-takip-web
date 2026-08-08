@@ -678,24 +678,40 @@ function blobToBase64(blob) {
 
 let isAdminUser = false;
 let accountFormMode = 'login';
+let profileRequestSeq = 0;
 
 async function refreshCurrentUserProfile() {
+  const myRequestId = ++profileRequestSeq;
+
   if (!currentUser) {
-    currentUserProfile = null;
-    isAdminUser = false;
+    if (myRequestId === profileRequestSeq) {
+      currentUserProfile = null;
+      isAdminUser = false;
+    }
     return;
   }
+
+  const uid = currentUser.uid;
+  let profile = null;
+  let admin = false;
   try {
-    const userSnap = await db.collection('users').doc(currentUser.uid).get();
-    currentUserProfile = userSnap.exists ? userSnap.data() : null;
+    const userSnap = await db.collection('users').doc(uid).get();
+    profile = userSnap.exists ? userSnap.data() : null;
   } catch (e) {
-    currentUserProfile = null;
+    profile = null;
   }
   try {
-    const adminSnap = await db.collection('admins').doc(currentUser.uid).get();
-    isAdminUser = adminSnap.exists;
+    const adminSnap = await db.collection('admins').doc(uid).get();
+    admin = adminSnap.exists;
   } catch (e) {
-    isAdminUser = false;
+    admin = false;
+  }
+
+  // Discard this result if a newer refresh has since been requested (avoids races
+  // where an older, slower request resolves after a newer one and overwrites it).
+  if (myRequestId === profileRequestSeq) {
+    currentUserProfile = profile;
+    isAdminUser = admin;
   }
 }
 
