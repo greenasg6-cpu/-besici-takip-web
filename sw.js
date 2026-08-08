@@ -1,4 +1,4 @@
-const CACHE_NAME = 'besicitakip-v2';
+const CACHE_NAME = 'besicitakip-v3';
 const APP_SHELL = ['./', './index.html', './style.css', './app.js', './manifest.webmanifest'];
 const STATIC_ASSETS = ['./icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];
 
@@ -32,7 +32,7 @@ self.addEventListener('fetch', (event) => {
   // version when online, falling back to cache when offline.
   if (isAppShellRequest(url) || event.request.mode === 'navigate') {
     event.respondWith(
-      fetch(event.request)
+      fetch(event.request, { cache: 'no-store' })
         .then((response) => {
           if (response.ok) {
             const clone = response.clone();
