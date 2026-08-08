@@ -686,14 +686,15 @@ async function refreshCurrentUserProfile() {
     return;
   }
   try {
-    const [userSnap, adminSnap] = await Promise.all([
-      db.collection('users').doc(currentUser.uid).get(),
-      db.collection('admins').doc(currentUser.uid).get(),
-    ]);
+    const userSnap = await db.collection('users').doc(currentUser.uid).get();
     currentUserProfile = userSnap.exists ? userSnap.data() : null;
-    isAdminUser = adminSnap.exists;
   } catch (e) {
     currentUserProfile = null;
+  }
+  try {
+    const adminSnap = await db.collection('admins').doc(currentUser.uid).get();
+    isAdminUser = adminSnap.exists;
+  } catch (e) {
     isAdminUser = false;
   }
 }
@@ -769,8 +770,11 @@ async function submitLogin() {
   const password = document.getElementById('lf-password').value;
   if (!email || !password) return alert('E-posta ve şifre zorunludur.');
   try {
-    await auth.signInWithEmailAndPassword(email, password);
+    const cred = await auth.signInWithEmailAndPassword(email, password);
+    currentUser = cred.user;
+    await refreshCurrentUserProfile();
     toast('Giriş yapıldı');
+    render();
   } catch (e) {
     alert(loginErrorMessage(e));
   }
@@ -797,6 +801,7 @@ async function submitRegister() {
   if (!name || !email || !password) return alert('Ad, e-posta ve şifre zorunludur.');
   try {
     const cred = await auth.createUserWithEmailAndPassword(email, password);
+    currentUser = cred.user;
     await db.collection('users').doc(cred.user.uid).set({
       displayName: name,
       email,
@@ -806,7 +811,9 @@ async function submitRegister() {
       muted: false,
       createdAt: firebase.firestore.FieldValue.serverTimestamp(),
     });
+    await refreshCurrentUserProfile();
     toast('Kayıt tamamlandı, hoş geldin!');
+    render();
   } catch (e) {
     alert(loginErrorMessage(e));
   }
