@@ -716,6 +716,7 @@ async function refreshCurrentUserProfile() {
 }
 
 function renderAccount(root) {
+  setTitle('Hesabım');
   if (!window.firebaseReady) {
     root.innerHTML = `<div class="empty-state"><strong>İnternet bağlantısı yok</strong>Hesap özellikleri için internete bağlanman gerekiyor.</div>`;
     return;
