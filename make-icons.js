@@ -85,10 +85,10 @@ function makePng(size, bgHex, drawCow) {
 const outDir = path.join(__dirname, 'icons');
 fs.mkdirSync(outDir, { recursive: true });
 
-const GREEN = '#2f6f4f';
+const TERRACOTTA = '#c67139';
 
 for (const size of [192, 512, 180]) {
-  const png = makePng(size, GREEN);
+  const png = makePng(size, TERRACOTTA);
   const name = size === 180 ? 'apple-touch-icon.png' : `icon-${size}.png`;
   fs.writeFileSync(path.join(outDir, name), png);
   console.log('wrote', name, png.length, 'bytes');

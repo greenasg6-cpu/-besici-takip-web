@@ -112,6 +112,31 @@ function latestWeightFor(animalId) {
   return rows[0] || null;
 }
 
+function dailyGainFor(animal) {
+  const latest = latestWeightFor(animal.id);
+  if (!latest || animal.entry_weight === null || animal.entry_weight === undefined) return null;
+  const days = daysBetween(animal.entry_date, latest.date);
+  if (days <= 0) return null;
+  return (latest.weight - animal.entry_weight) / days;
+}
+
+function animalIdsNeedingAttention(withinDays) {
+  const ids = new Set();
+  for (const v of DB.vaccinations) {
+    if (!v.next_date) continue;
+    if (daysUntil(v.next_date) <= withinDays) ids.add(v.animal_id);
+  }
+  return ids;
+}
+
+function distinctPens() {
+  const pens = new Set();
+  for (const a of DB.animals) {
+    if (a.pen && a.pen.trim()) pens.add(a.pen.trim());
+  }
+  return Array.from(pens).sort((a, b) => a.localeCompare(b, 'tr'));
+}
+
 function saveAnimal(data, existingId) {
   const ts = nowIso();
   if (existingId) {
@@ -238,7 +263,7 @@ const state = {
   detailId: null,
   search: '',
   filter: 'hepsi',
-  sort: 'giris_yeni',
+  detailTab: 'kilo',
   moreScreen: null,
   listingId: null,
   postId: null,
@@ -271,6 +296,7 @@ function goTab(tab) {
 
 function openAnimal(id) {
   state.detailId = id;
+  state.detailTab = 'kilo';
   render();
 }
 
@@ -337,24 +363,23 @@ function requireLogin(actionLabel) {
 
 /* ---------------- Animals list ---------------- */
 
-function sortAnimals(list) {
-  const copy = list.slice();
-  if (state.sort === 'kupe_no') {
-    copy.sort((a, b) => a.ear_tag.localeCompare(b.ear_tag, 'tr'));
-  } else if (state.sort === 'kilo_cok') {
-    copy.sort((a, b) => {
-      const wa = (latestWeightFor(a.id) || {}).weight ?? a.entry_weight ?? 0;
-      const wb = (latestWeightFor(b.id) || {}).weight ?? b.entry_weight ?? 0;
-      return wb - wa;
-    });
-  }
-  return copy;
-}
-
 function renderAnimalsList(root) {
   setTitle('Hayvanlarım');
-  let list = listAnimals();
-  if (state.filter !== 'hepsi') list = list.filter((a) => a.status === state.filter);
+
+  const allAnimals = listAnimals();
+  const activeAnimals = allAnimals.filter((a) => a.status === 'aktif');
+  const pens = distinctPens();
+  const attention = animalIdsNeedingAttention(14);
+
+  let list;
+  if (state.filter === 'satildi_hepsi') {
+    list = allAnimals.filter((a) => a.status !== 'aktif');
+  } else if (state.filter === 'hepsi') {
+    list = activeAnimals;
+  } else {
+    list = activeAnimals.filter((a) => a.pen === state.filter);
+  }
+
   if (state.search.trim()) {
     const q = state.search.trim().toLowerCase();
     list = list.filter(
@@ -364,42 +389,43 @@ function renderAnimalsList(root) {
         (a.pen || '').toLowerCase().includes(q)
     );
   }
-  list = sortAnimals(list);
 
-  const filters = [
-    ['hepsi', 'Hepsi'],
-    ['aktif', 'Aktif'],
-    ['satildi', 'Satıldı'],
-    ['oldu', 'Öldü'],
-    ['kesildi', 'Kesildi'],
-  ];
-  const sorts = [
-    ['giris_yeni', 'En Yeni Giriş'],
-    ['kupe_no', 'Küpe No'],
-    ['kilo_cok', 'Kilo (Çok-Az)'],
-  ];
+  const filters = [['hepsi', 'Hepsi']]
+    .concat(pens.map((p) => [p, p]))
+    .concat([['satildi_hepsi', 'Satılanlar']]);
+
+  const gains = activeAnimals.map(dailyGainFor).filter((g) => g !== null);
+  const avgGain = gains.length ? gains.reduce((s, g) => s + g, 0) / gains.length : null;
 
   const cardsHtml = list.length
     ? list
         .map((a) => {
           const w = latestWeightFor(a.id);
           const weightVal = w ? w.weight : a.entry_weight;
+          const gain = dailyGainFor(a);
           const avatar = a.photo_uri
             ? `<img src="${a.photo_uri}" alt="" onclick="event.stopPropagation(); openPhotoLightbox('${a.photo_uri}')">`
             : '🐄';
+          const genderBadge = a.gender
+            ? `<span class="badge badge-${a.gender === 'erkek' ? 'erkek' : 'disi'}">${a.gender === 'erkek' ? 'Erkek' : 'Dişi'}</span>`
+            : '';
           return `
         <div class="animal-card" onclick="openAnimal(${a.id})">
           <div class="top">
             <div class="avatar">${avatar}</div>
             <div class="info">
-              <div class="ear-tag">${escapeHtml(a.ear_tag)}</div>
-              ${a.name ? `<div class="name">${escapeHtml(a.name)}</div>` : ''}
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span class="ear-tag">${escapeHtml(a.ear_tag)}</span>
+                ${genderBadge}
+              </div>
+              <div class="name">${[a.breed, a.pen].filter(Boolean).map(escapeHtml).join(' · ') || escapeHtml(a.species)}</div>
             </div>
-            <div class="badge badge-${a.status}">${STATUS_LABEL[a.status]}</div>
+            ${a.status !== 'aktif' ? `<div class="badge badge-${a.status}">${STATUS_LABEL[a.status]}</div>` : ''}
           </div>
           <div class="bottom">
-            <span>${[a.breed, a.pen].filter(Boolean).map(escapeHtml).join(' · ')}${a.breed || a.pen ? ' · ' : ''}Giriş: ${formatDate(a.entry_date)}</span>
             <span class="weight">${formatWeight(weightVal)}</span>
+            ${gain !== null ? `<span class="gain">+${gain.toFixed(2)}/gün</span>` : ''}
+            ${attention.has(a.id) ? '<span class="alert-dot"></span>' : ''}
           </div>
         </div>`;
         })
@@ -407,17 +433,28 @@ function renderAnimalsList(root) {
     : `<div class="empty-state"><strong>Henüz hayvan eklenmemiş</strong>Sağ alttaki + butonuyla ilk hayvanınızı ekleyin.</div>`;
 
   root.innerHTML = `
+    <div class="chip-row">
+      ${filters.map(([v, l]) => `<div class="chip ${state.filter === v ? 'active' : ''}" onclick="setFilter('${escapeHtml(v)}')">${escapeHtml(l)}</div>`).join('')}
+    </div>
+    <div class="stat-row">
+      <div class="stat-block fill">
+        <div class="stat-label">Ahırda</div>
+        <div class="stat-value">${activeAnimals.length}</div>
+      </div>
+      <div class="stat-block outline">
+        <div class="stat-label">Günlük ortalama</div>
+        <div class="stat-value">${avgGain !== null ? avgGain.toFixed(2) + ' kg' : '-'}</div>
+      </div>
+    </div>
     <div class="search-row">
       <span>🔍</span>
       <input id="search-input" type="text" placeholder="Küpe no, isim veya ahır ara..." value="${escapeHtml(state.search)}">
     </div>
-    <div class="chip-row">
-      ${filters.map(([v, l]) => `<div class="chip ${state.filter === v ? 'active' : ''}" onclick="setFilter('${v}')">${l}</div>`).join('')}
-    </div>
-    <div class="chip-row">
-      ${sorts.map(([v, l]) => `<div class="chip ${state.sort === v ? 'active' : ''}" onclick="setSort('${v}')">${l}</div>`).join('')}
-    </div>
     ${cardsHtml}
+    <div class="info-banner" style="margin-top:8px;">
+      <div class="icon">⬇</div>
+      <div>Bu liste telefonunda duruyor, internetsiz de açılır. <a href="#" onclick="goMore('settings'); return false;" style="font-weight:800;color:inherit;">Yedeğini al</a></div>
+    </div>
     <button class="fab" onclick="openAnimalForm()">+</button>
   `;
 
@@ -433,10 +470,6 @@ function renderAnimalsList(root) {
 
 function setFilter(v) {
   state.filter = v;
-  render();
-}
-function setSort(v) {
-  state.sort = v;
   render();
 }
 
@@ -1022,7 +1055,7 @@ function confirmDeleteListing(id) {
     .catch((e) => alert('Hata: ' + e.message));
 }
 
-function openListingForm() {
+function openListingForm(preselectAnimalId) {
   if (!requireLogin('İlan vermek')) return;
   const p = currentUserProfile || {};
   const trackedAnimals = listAnimals().filter((a) => a.status === 'aktif');
@@ -1032,7 +1065,7 @@ function openListingForm() {
         ? `<label class="field"><span class="field-label">Kayıtlı hayvanlarından doldur (opsiyonel)</span>
       <select id="lf-from-animal" onchange="fillListingFromAnimal(this.value)">
         <option value="">— Manuel gir —</option>
-        ${trackedAnimals.map((a) => `<option value="${a.id}">${escapeHtml(a.ear_tag)}${a.name ? ' · ' + escapeHtml(a.name) : ''}</option>`).join('')}
+        ${trackedAnimals.map((a) => `<option value="${a.id}" ${preselectAnimalId && Number(preselectAnimalId) === a.id ? 'selected' : ''}>${escapeHtml(a.ear_tag)}${a.name ? ' · ' + escapeHtml(a.name) : ''}</option>`).join('')}
       </select></label>`
         : ''
     }
@@ -1056,6 +1089,7 @@ function openListingForm() {
   `;
   openModal('Yeni İlan', body, () => {
     document.getElementById('lf-photo-input').addEventListener('change', handleListingPhotoInput);
+    if (preselectAnimalId) fillListingFromAnimal(preselectAnimalId);
   });
 }
 
@@ -1518,6 +1552,14 @@ function adminDeletePost(id) {
 
 /* ---------------- Animal detail ---------------- */
 
+function vaccineStatusInfo(v) {
+  if (!v.next_date) return { label: 'Sonraki doz girilmedi', color: 'var(--muted)', border: 'var(--border)' };
+  const remaining = daysUntil(v.next_date);
+  if (remaining < 0) return { label: `${Math.abs(remaining)} gün geçti`, color: 'var(--red)', border: 'var(--red)' };
+  if (remaining <= 14) return { label: `${remaining} gün kaldı`, color: 'var(--primary-active)', border: '#f6a06b' };
+  return { label: 'Zamanında', color: 'var(--sage-dark)', border: 'var(--border)' };
+}
+
 function renderDetail(root, id) {
   const animal = getAnimal(id);
   if (!animal) {
@@ -1530,39 +1572,144 @@ function renderDetail(root, id) {
   const health = listHealth(id);
   const expenses = listExpenses(id);
   const latest = weights[0];
+  const gain = dailyGainFor(animal);
+  const daysInPen = Math.max(0, daysBetween(animal.entry_date, todayIso()));
+  const expenseTotal = expenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
 
-  let gainText = '';
-  if (latest) {
-    const days = daysBetween(animal.entry_date, latest.date);
-    if (days > 0 && animal.entry_weight !== null && animal.entry_weight !== undefined) {
-      const gain = (latest.weight - animal.entry_weight) / days;
-      gainText = `<div class="row"><span class="label">Günlük Ort. Kazanç</span><span class="value">${gain.toFixed(2)} kg/gün</span></div>`;
-    }
-  }
+  const statCards = [
+    { k: 'Güncel kilo', v: formatWeight(latest ? latest.weight : animal.entry_weight) },
+    { k: 'Günlük kazanç', v: gain !== null ? gain.toFixed(2) : '-' },
+    { k: 'Ahırda', v: `${daysInPen} gün` },
+  ];
+
+  const tabs = [
+    ['kilo', 'Kilo'],
+    ['asi', 'Aşı'],
+    ['saglik', 'Sağlık'],
+    ['gider', 'Gider'],
+  ];
 
   const sparkline = renderSparklineHtml(weights.slice().reverse());
+  const firstW = weights[weights.length - 1];
+  const weightDeltaText =
+    weights.length >= 2
+      ? `${latest.weight - firstW.weight >= 0 ? '+' : ''}${(latest.weight - firstW.weight).toFixed(1)} kg / ${daysBetween(firstW.date, latest.date)} gün`
+      : '';
+
+  let tabBody = '';
+  if (state.detailTab === 'kilo') {
+    tabBody = `
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;">
+          <div style="font-family:var(--font-heading);font-size:19px;">Kilo geçmişi</div>
+          ${weightDeltaText ? `<div style="font-size:14px;font-weight:800;color:var(--primary-active);">${weightDeltaText}</div>` : ''}
+        </div>
+        ${sparkline || '<div class="empty-state">Henüz kilo kaydı yok</div>'}
+        ${weights
+          .map(
+            (w) => `
+        <div class="list-row">
+          <div class="body"><div class="title">${formatWeight(w.weight)}</div><div class="subtitle">${formatDate(w.date)}</div>${w.note ? `<div class="note">${escapeHtml(w.note)}</div>` : ''}</div>
+          <button class="delete-btn" onclick="confirmDeleteRecord('weight', ${w.id}, ${id})">🗑</button>
+        </div>`
+          )
+          .join('')}
+        <button class="btn btn-secondary" style="margin-top:16px;" onclick="openWeightForm(${id})">Yeni tartım gir</button>
+      </div>`;
+  } else if (state.detailTab === 'asi') {
+    tabBody = vaccinations.length
+      ? vaccinations
+          .map((v) => {
+            const info = vaccineStatusInfo(v);
+            return `
+        <div class="card" style="display:flex;gap:13px;align-items:center;border-color:${info.border};">
+          <div style="width:12px;height:44px;border-radius:999px;background:${info.color};flex:none;"></div>
+          <div style="flex:1;">
+            <div style="font-size:17px;font-weight:800;">${escapeHtml(v.name)}</div>
+            <div style="font-size:13.5px;font-weight:600;color:var(--muted);margin-top:3px;">Yapıldı ${formatDate(v.date)}${v.next_date ? ' · Sonraki ' + formatDate(v.next_date) : ''}</div>
+          </div>
+          <div style="font-size:13px;font-weight:800;color:${info.color};text-align:right;line-height:1.3;flex:none;max-width:82px;">${info.label}</div>
+          <button class="delete-btn" onclick="confirmDeleteRecord('vaccination', ${v.id}, ${id})">🗑</button>
+        </div>`;
+          })
+          .join('') + `<button class="btn btn-secondary" onclick="openVaccinationForm(${id})">Aşı Ekle</button>`
+      : `<div class="empty-state"><strong>Henüz aşı kaydı yok</strong></div><button class="btn btn-secondary" onclick="openVaccinationForm(${id})">Aşı Ekle</button>`;
+  } else if (state.detailTab === 'saglik') {
+    tabBody = health.length
+      ? health
+          .map(
+            (h) => `
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;">
+            <div style="font-size:17px;font-weight:800;">${escapeHtml(h.diagnosis || HEALTH_TYPE_LABEL[h.type])}</div>
+            <div style="font-size:13px;font-weight:700;color:var(--muted);">${formatDate(h.date)}</div>
+          </div>
+          <div style="font-size:13px;font-weight:700;color:${h.resolved ? 'var(--sage-dark)' : 'var(--primary-active)'};margin-top:4px;">${h.resolved ? 'İyileşti' : 'Devam ediyor'}</div>
+          ${h.treatment ? `<div style="font-size:14.5px;font-weight:500;color:var(--text-soft);line-height:1.5;margin-top:6px;">${escapeHtml(h.treatment)}</div>` : ''}
+          <button class="delete-btn" style="margin-top:6px;" onclick="confirmDeleteRecord('health', ${h.id}, ${id})">🗑 Sil</button>
+        </div>`
+          )
+          .join('') + `<button class="btn btn-secondary" onclick="openHealthForm(${id})">Sağlık Kaydı Ekle</button>`
+      : `<div class="empty-state"><strong>Henüz sağlık kaydı yok</strong></div><button class="btn btn-secondary" onclick="openHealthForm(${id})">Sağlık Kaydı Ekle</button>`;
+  } else if (state.detailTab === 'gider') {
+    tabBody = `
+      <div class="card" style="padding:0;overflow:hidden;">
+        ${
+          expenses.length
+            ? expenses
+                .map(
+                  (e) => `
+        <div class="list-row" style="padding-left:16px;padding-right:16px;">
+          <div class="body"><div class="title">${EXPENSE_LABEL[e.category]}</div><div class="subtitle">${formatDate(e.date)}${e.notes ? ' · ' + escapeHtml(e.notes) : ''}</div></div>
+          <div style="font-size:17px;font-weight:900;">${formatMoney(e.amount)}</div>
+          <button class="delete-btn" onclick="confirmDeleteRecord('expense', ${e.id}, ${id})">🗑</button>
+        </div>`
+                )
+                .join('')
+            : '<div class="empty-state" style="padding:16px;">Henüz gider kaydı yok</div>'
+        }
+        ${
+          expenses.length
+            ? `<div style="display:flex;align-items:center;justify-content:space-between;padding:16px;background:var(--card-alt);">
+                <div style="font-family:var(--font-heading);font-size:17px;">Toplam</div>
+                <div style="font-family:var(--font-heading);font-size:21px;color:var(--primary-active);">${formatMoney(expenseTotal)}</div>
+              </div>`
+            : ''
+        }
+      </div>
+      <button class="btn btn-secondary" onclick="openExpenseForm(${id})">Gider Ekle</button>`;
+  }
 
   root.innerHTML = `
     <button class="btn btn-ghost" style="margin-bottom:12px;" onclick="closeDetail()">← Geri</button>
 
-    <div class="card">
-      <div style="display:flex; align-items:center; gap:12px;">
-        <div class="avatar" style="width:56px;height:56px;border-radius:28px;font-size:26px;">${animal.photo_uri ? `<img src="${animal.photo_uri}" onclick="event.stopPropagation(); openPhotoLightbox('${animal.photo_uri}')">` : '🐄'}</div>
-        <div style="flex:1;">
-          <div style="font-size:22px;font-weight:800;">${escapeHtml(animal.ear_tag)}</div>
-          ${animal.name ? `<div style="font-size:14px;color:var(--muted);">${escapeHtml(animal.name)}</div>` : ''}
-        </div>
-        <div class="badge badge-${animal.status}">${STATUS_LABEL[animal.status]}</div>
+    ${
+      animal.photo_uri
+        ? `<div class="photo-header" onclick="openPhotoLightbox('${animal.photo_uri}')"><img src="${animal.photo_uri}"></div>`
+        : `<div class="photo-header">hayvan fotoğrafı — dokun, büyüsün</div>`
+    }
+
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin:14px 0 4px;">
+      <div>
+        <div style="font-size:24px;font-weight:900;">${escapeHtml(animal.ear_tag)}</div>
+        <div style="font-size:14px;font-weight:600;color:var(--muted);margin-top:2px;">${escapeHtml(animal.breed || animal.species)}${animal.gender ? ' · ' + (animal.gender === 'erkek' ? 'Erkek' : 'Dişi') : ''}${animal.pen ? ' · ' + escapeHtml(animal.pen) : ''}</div>
       </div>
-      <div style="height:1px;background:var(--border);margin:12px 0;"></div>
-      <div class="row"><span class="label">Tür / Cins</span><span class="value">${escapeHtml(animal.species)}${animal.breed ? ' · ' + escapeHtml(animal.breed) : ''}</span></div>
-      <div class="row"><span class="label">Cinsiyet</span><span class="value">${animal.gender === 'erkek' ? 'Erkek' : animal.gender === 'disi' ? 'Dişi' : '-'}</span></div>
+      <div class="badge badge-${animal.status}">${STATUS_LABEL[animal.status]}</div>
+    </div>
+
+    <div class="stat-row" style="margin-top:12px;">
+      ${statCards.map((s) => `<div class="stat-block outline"><div class="stat-label">${s.k}</div><div class="stat-value">${s.v}</div></div>`).join('')}
+    </div>
+
+    <div class="seg-row">
+      ${tabs.map(([k, l]) => `<div class="seg-opt ${state.detailTab === k ? 'active' : ''}" onclick="setDetailTab('${k}')">${l}</div>`).join('')}
+    </div>
+
+    ${tabBody}
+
+    <div class="card" style="margin-top:16px;">
       <div class="row"><span class="label">Doğum Tarihi</span><span class="value">${formatDate(animal.birth_date)}</span></div>
-      <div class="row"><span class="label">Giriş Tarihi</span><span class="value">${formatDate(animal.entry_date)}</span></div>
-      <div class="row"><span class="label">Giriş Kilosu</span><span class="value">${formatWeight(animal.entry_weight)}</span></div>
-      <div class="row"><span class="label">Güncel Kilo</span><span class="value">${formatWeight(latest ? latest.weight : animal.entry_weight)}</span></div>
-      ${gainText}
-      <div class="row"><span class="label">Ahır / Grup</span><span class="value">${escapeHtml(animal.pen) || '-'}</span></div>
+      <div class="row"><span class="label">Giriş Tarihi / Kilosu</span><span class="value">${formatDate(animal.entry_date)} · ${formatWeight(animal.entry_weight)}</span></div>
       <div class="row"><span class="label">Alış Fiyatı</span><span class="value">${formatMoney(animal.purchase_price)}</span></div>
       ${animal.source ? `<div class="row"><span class="label">Kaynak</span><span class="value">${escapeHtml(animal.source)}</span></div>` : ''}
       ${
@@ -1573,81 +1720,19 @@ function renderDetail(root, id) {
           : ''
       }
       ${animal.notes ? `<div class="row"><span class="label">Not</span><span class="value">${escapeHtml(animal.notes)}</span></div>` : ''}
-      <div class="btn-row" style="margin-top:14px;">
-        <button class="btn btn-secondary" onclick="openAnimalForm(${id})">Düzenle</button>
-        <button class="btn btn-danger" onclick="confirmDeleteAnimal(${id})">Sil</button>
-      </div>
     </div>
 
-    <div class="card">
-      <div class="section-title-row"><h3>Kilo Geçmişi</h3><button class="add-btn" onclick="openWeightForm(${id})">+</button></div>
-      ${sparkline}
-      ${
-        weights.length
-          ? weights
-              .map(
-                (w) => `
-        <div class="list-row">
-          <div class="body"><div class="title">${formatWeight(w.weight)}</div><div class="subtitle">${formatDate(w.date)}</div>${w.note ? `<div class="note">${escapeHtml(w.note)}</div>` : ''}</div>
-          <button class="delete-btn" onclick="confirmDeleteRecord('weight', ${w.id}, ${id})">🗑</button>
-        </div>`
-              )
-              .join('')
-          : '<div class="empty-state">Henüz kilo kaydı yok</div>'
-      }
+    <div class="btn-row" style="margin-top:6px;">
+      ${animal.status === 'aktif' ? `<button class="btn btn-primary" onclick="openListingForm(${id})">Pazar Yeri'nde sat</button>` : ''}
+      <button class="btn btn-ghost" onclick="openAnimalForm(${id})">Düzenle</button>
     </div>
-
-    <div class="card">
-      <div class="section-title-row"><h3>Aşılar</h3><button class="add-btn" onclick="openVaccinationForm(${id})">+</button></div>
-      ${
-        vaccinations.length
-          ? vaccinations
-              .map(
-                (v) => `
-        <div class="list-row">
-          <div class="body"><div class="title">${escapeHtml(v.name)}</div><div class="subtitle">${formatDate(v.date)}${v.next_date ? ' · Sonraki: ' + formatDate(v.next_date) : ''}</div>${v.notes ? `<div class="note">${escapeHtml(v.notes)}</div>` : ''}</div>
-          <button class="delete-btn" onclick="confirmDeleteRecord('vaccination', ${v.id}, ${id})">🗑</button>
-        </div>`
-              )
-              .join('')
-          : '<div class="empty-state">Henüz aşı kaydı yok</div>'
-      }
-    </div>
-
-    <div class="card">
-      <div class="section-title-row"><h3>Sağlık Kayıtları</h3><button class="add-btn" onclick="openHealthForm(${id})">+</button></div>
-      ${
-        health.length
-          ? health
-              .map(
-                (h) => `
-        <div class="list-row">
-          <div class="body"><div class="title">${escapeHtml(h.diagnosis || HEALTH_TYPE_LABEL[h.type])}</div><div class="subtitle">${formatDate(h.date)} · ${h.resolved ? 'İyileşti' : 'Devam ediyor'}</div>${h.treatment ? `<div class="note">${escapeHtml(h.treatment)}</div>` : ''}</div>
-          <button class="delete-btn" onclick="confirmDeleteRecord('health', ${h.id}, ${id})">🗑</button>
-        </div>`
-              )
-              .join('')
-          : '<div class="empty-state">Henüz sağlık kaydı yok</div>'
-      }
-    </div>
-
-    <div class="card">
-      <div class="section-title-row"><h3>Giderler</h3><button class="add-btn" onclick="openExpenseForm(${id})">+</button></div>
-      ${
-        expenses.length
-          ? expenses
-              .map(
-                (e) => `
-        <div class="list-row">
-          <div class="body"><div class="title">${EXPENSE_LABEL[e.category]} · ${formatMoney(e.amount)}</div><div class="subtitle">${formatDate(e.date)}</div>${e.notes ? `<div class="note">${escapeHtml(e.notes)}</div>` : ''}</div>
-          <button class="delete-btn" onclick="confirmDeleteRecord('expense', ${e.id}, ${id})">🗑</button>
-        </div>`
-              )
-              .join('')
-          : '<div class="empty-state">Henüz gider kaydı yok</div>'
-      }
-    </div>
+    <button class="btn btn-danger" style="margin-top:10px;" onclick="confirmDeleteAnimal(${id})">Hayvanı Sil</button>
   `;
+}
+
+function setDetailTab(tab) {
+  state.detailTab = tab;
+  render();
 }
 
 function renderSparklineHtml(records) {
@@ -1728,6 +1813,24 @@ function openPhotoLightbox(uri) {
 
 const SPECIES_OPTIONS = ['Sığır', 'Koyun', 'Keçi', 'Manda', 'Diğer'];
 
+function chipSelectHtml(name, options, selected) {
+  return options
+    .map((o) => {
+      const value = typeof o === 'string' ? o : o.value;
+      const label = typeof o === 'string' ? o : o.label;
+      const safeValue = escapeHtml(value).replace(/'/g, "\\'");
+      return `<div class="chip ${selected === value ? 'active' : ''}" onclick="selectFormChip('${name}', '${safeValue}', this)">${escapeHtml(label)}</div>`;
+    })
+    .join('');
+}
+
+function selectFormChip(hiddenInputId, value, el) {
+  const input = document.getElementById(hiddenInputId);
+  if (input) input.value = value;
+  el.parentElement.querySelectorAll('.chip').forEach((c) => c.classList.remove('active'));
+  el.classList.add('active');
+}
+
 function openAnimalForm(existingId) {
   const animal = existingId ? getAnimal(existingId) : null;
   const a = animal || {
@@ -1735,75 +1838,103 @@ function openAnimalForm(existingId) {
     entry_date: todayIso(), entry_weight: '', purchase_price: '', source: '', pen: '',
     status: 'aktif', exit_date: '', sale_price: '', sale_weight: '', notes: '', photo_uri: null,
   };
+  const pens = distinctPens();
 
   const body = `
-    <div class="photo-picker">
-      <button type="button" class="avatar-lg" id="af-photo-btn" onclick="document.getElementById('af-photo-input').click()">
-        ${a.photo_uri ? `<img id="af-photo-preview" src="${a.photo_uri}">` : '<span id="af-photo-preview-text">📷<br>Fotoğraf Ekle</span>'}
-      </button>
-      <input type="file" id="af-photo-input" accept="image/*" capture="environment" class="hidden">
-    </div>
-    <input type="hidden" id="af-photo-data" value="${a.photo_uri ? escapeHtml(a.photo_uri) : ''}">
+    <div style="font-size:15px;font-weight:600;color:var(--text-soft);line-height:1.5;margin-bottom:16px;">Küpe no ve türü yaz, gerisi sonra. Acelesi yok.</div>
 
     <label class="field"><span class="field-label">Küpe Numarası <span class="required">*</span></span>
-      <input type="text" id="af-ear-tag" value="${escapeHtml(a.ear_tag)}" placeholder="TR-1234-5678"></label>
-    <label class="field"><span class="field-label">İsim / Lakap</span>
-      <input type="text" id="af-name" value="${escapeHtml(a.name || '')}" placeholder="Opsiyonel"></label>
+      <input type="text" id="af-ear-tag" value="${escapeHtml(a.ear_tag)}" placeholder="TR-1234-5678" autofocus></label>
 
-    <label class="field"><span class="field-label">Tür</span>
-      <select id="af-species">${SPECIES_OPTIONS.map((s) => `<option value="${s}" ${a.species === s ? 'selected' : ''}>${s}</option>`).join('')}</select>
-    </label>
-    <label class="field"><span class="field-label">Cins / Irk</span>
-      <input type="text" id="af-breed" value="${escapeHtml(a.breed || '')}" placeholder="Ör. Simmental"></label>
-    <label class="field"><span class="field-label">Cinsiyet</span>
-      <select id="af-gender">
-        <option value="">Belirtilmedi</option>
-        <option value="erkek" ${a.gender === 'erkek' ? 'selected' : ''}>Erkek</option>
-        <option value="disi" ${a.gender === 'disi' ? 'selected' : ''}>Dişi</option>
-      </select>
-    </label>
-    <label class="field"><span class="field-label">Doğum Tarihi</span>
-      <input type="date" id="af-birth-date" value="${a.birth_date || ''}"></label>
-    <label class="field"><span class="field-label">Çiftliğe Giriş Tarihi <span class="required">*</span></span>
-      <input type="date" id="af-entry-date" value="${a.entry_date}"></label>
-    <label class="field"><span class="field-label">Giriş Kilosu (kg)</span>
-      <input type="number" step="0.1" id="af-entry-weight" value="${a.entry_weight ?? ''}" placeholder="Ör. 320"></label>
-    <label class="field"><span class="field-label">Alış Fiyatı (₺)</span>
-      <input type="number" step="0.01" id="af-purchase-price" value="${a.purchase_price ?? ''}" placeholder="Ör. 45000"></label>
-    <label class="field"><span class="field-label">Nereden Alındı</span>
-      <input type="text" id="af-source" value="${escapeHtml(a.source || '')}" placeholder="Pazar, yetiştirici vb."></label>
-    <label class="field"><span class="field-label">Ahır / Padok / Grup</span>
-      <input type="text" id="af-pen" value="${escapeHtml(a.pen || '')}" placeholder="Ör. A Bloğu"></label>
-
-    <label class="field"><span class="field-label">Durum</span>
-      <select id="af-status" onchange="toggleAnimalFormStatusFields()">
-        <option value="aktif" ${a.status === 'aktif' ? 'selected' : ''}>Aktif</option>
-        <option value="satildi" ${a.status === 'satildi' ? 'selected' : ''}>Satıldı</option>
-        <option value="oldu" ${a.status === 'oldu' ? 'selected' : ''}>Öldü</option>
-        <option value="kesildi" ${a.status === 'kesildi' ? 'selected' : ''}>Kesildi</option>
-      </select>
-    </label>
-
-    <div id="af-exit-fields" class="${a.status === 'aktif' ? 'hidden' : ''}">
-      <label class="field"><span class="field-label">Çıkış / Satış Tarihi</span>
-        <input type="date" id="af-exit-date" value="${a.exit_date || ''}"></label>
-    </div>
-    <div id="af-sale-fields" class="${a.status === 'satildi' ? '' : 'hidden'}">
-      <label class="field"><span class="field-label">Satış Kilosu (kg)</span>
-        <input type="number" step="0.1" id="af-sale-weight" value="${a.sale_weight ?? ''}" placeholder="Ör. 480"></label>
-      <label class="field"><span class="field-label">Satış Fiyatı (₺)</span>
-        <input type="number" step="0.01" id="af-sale-price" value="${a.sale_price ?? ''}" placeholder="Ör. 78000"></label>
+    <div class="field">
+      <span class="field-label">Tür <span class="required">*</span></span>
+      <div class="chip-row" style="margin-bottom:0;">${chipSelectHtml('af-species', SPECIES_OPTIONS, a.species)}</div>
+      <input type="hidden" id="af-species" value="${escapeHtml(a.species)}">
     </div>
 
-    <label class="field"><span class="field-label">Notlar</span>
-      <textarea id="af-notes" placeholder="Serbest not">${escapeHtml(a.notes || '')}</textarea></label>
+    <button type="button" class="btn btn-ghost" id="af-toggle-detail" style="margin:6px 0 4px;" onclick="toggleAnimalFormDetail()">
+      ${existingId ? 'Detayları gizle' : 'Detay ekle (kilo, fiyat, ahır, foto)'}
+    </button>
 
-    <button class="btn btn-primary" onclick="submitAnimalForm(${existingId || 'null'})">${existingId ? 'Değişiklikleri Kaydet' : 'Hayvanı Kaydet'}</button>
+    <div id="af-detail-fields" class="${existingId ? '' : 'hidden'}" style="margin-top:12px;">
+      <div class="photo-picker">
+        <button type="button" class="avatar-lg" id="af-photo-btn" onclick="document.getElementById('af-photo-input').click()">
+          ${a.photo_uri ? `<img id="af-photo-preview" src="${a.photo_uri}">` : '<span id="af-photo-preview-text">📷<br>Fotoğraf Ekle</span>'}
+        </button>
+        <input type="file" id="af-photo-input" accept="image/*" capture="environment" class="hidden">
+      </div>
+      <input type="hidden" id="af-photo-data" value="${a.photo_uri ? escapeHtml(a.photo_uri) : ''}">
+
+      <label class="field"><span class="field-label">İsim / Lakap</span>
+        <input type="text" id="af-name" value="${escapeHtml(a.name || '')}" placeholder="Opsiyonel"></label>
+      <label class="field"><span class="field-label">Cins / Irk</span>
+        <input type="text" id="af-breed" value="${escapeHtml(a.breed || '')}" placeholder="Ör. Simmental"></label>
+
+      <div class="field">
+        <span class="field-label">Cinsiyet</span>
+        <div class="chip-row" style="margin-bottom:0;">${chipSelectHtml('af-gender', [{ value: 'erkek', label: 'Erkek' }, { value: 'disi', label: 'Dişi' }], a.gender || '')}</div>
+        <input type="hidden" id="af-gender" value="${a.gender || ''}">
+      </div>
+
+      <label class="field"><span class="field-label">Doğum Tarihi</span>
+        <input type="date" id="af-birth-date" value="${a.birth_date || ''}"></label>
+      <label class="field"><span class="field-label">Çiftliğe Giriş Tarihi <span class="required">*</span></span>
+        <input type="date" id="af-entry-date" value="${a.entry_date}"></label>
+
+      <div style="display:flex;gap:10px;">
+        <label class="field" style="flex:1;"><span class="field-label">Giriş Kilosu (kg)</span>
+          <input type="number" step="0.1" id="af-entry-weight" value="${a.entry_weight ?? ''}" placeholder="Ör. 320"></label>
+        <label class="field" style="flex:1;"><span class="field-label">Alış Fiyatı (₺)</span>
+          <input type="number" step="0.01" id="af-purchase-price" value="${a.purchase_price ?? ''}" placeholder="Ör. 45000"></label>
+      </div>
+
+      <label class="field"><span class="field-label">Nereden Alındı</span>
+        <input type="text" id="af-source" value="${escapeHtml(a.source || '')}" placeholder="Pazar, yetiştirici vb."></label>
+
+      <div class="field">
+        <span class="field-label">Ahır / Bölme</span>
+        ${pens.length ? `<div class="chip-row" style="margin-bottom:8px;">${chipSelectHtml('af-pen', pens, a.pen || '')}</div>` : ''}
+        <input type="text" id="af-pen" value="${escapeHtml(a.pen || '')}" placeholder="Ör. A Bloğu (yeni yazabilirsin)">
+      </div>
+
+      <label class="field"><span class="field-label">Durum</span>
+        <select id="af-status" onchange="toggleAnimalFormStatusFields()">
+          <option value="aktif" ${a.status === 'aktif' ? 'selected' : ''}>Aktif</option>
+          <option value="satildi" ${a.status === 'satildi' ? 'selected' : ''}>Satıldı</option>
+          <option value="oldu" ${a.status === 'oldu' ? 'selected' : ''}>Öldü</option>
+          <option value="kesildi" ${a.status === 'kesildi' ? 'selected' : ''}>Kesildi</option>
+        </select>
+      </label>
+
+      <div id="af-exit-fields" class="${a.status === 'aktif' ? 'hidden' : ''}">
+        <label class="field"><span class="field-label">Çıkış / Satış Tarihi</span>
+          <input type="date" id="af-exit-date" value="${a.exit_date || ''}"></label>
+      </div>
+      <div id="af-sale-fields" class="${a.status === 'satildi' ? '' : 'hidden'}">
+        <label class="field"><span class="field-label">Satış Kilosu (kg)</span>
+          <input type="number" step="0.1" id="af-sale-weight" value="${a.sale_weight ?? ''}" placeholder="Ör. 480"></label>
+        <label class="field"><span class="field-label">Satış Fiyatı (₺)</span>
+          <input type="number" step="0.01" id="af-sale-price" value="${a.sale_price ?? ''}" placeholder="Ör. 78000"></label>
+      </div>
+
+      <label class="field"><span class="field-label">Notlar</span>
+        <textarea id="af-notes" placeholder="Serbest not">${escapeHtml(a.notes || '')}</textarea></label>
+    </div>
+
+    <button class="btn btn-primary" style="margin-top:8px;" onclick="submitAnimalForm(${existingId || 'null'})">${existingId ? 'Değişiklikleri Kaydet' : 'Kaydet'}</button>
+    ${existingId ? '' : '<div style="margin-top:12px;text-align:center;font-size:13.5px;font-weight:600;color:var(--muted);">Kaydettikten sonra detayları hayvanın sayfasından ekleyebilirsin.</div>'}
   `;
 
   openModal(existingId ? 'Hayvanı Düzenle' : 'Yeni Hayvan', body, () => {
     document.getElementById('af-photo-input').addEventListener('change', (e) => handlePhotoInput(e, 'af'));
   });
+}
+
+function toggleAnimalFormDetail() {
+  const el = document.getElementById('af-detail-fields');
+  const btn = document.getElementById('af-toggle-detail');
+  const nowHidden = el.classList.toggle('hidden');
+  btn.textContent = nowHidden ? 'Detay ekle (kilo, fiyat, ahır, foto)' : 'Detayları gizle';
 }
 
 function toggleAnimalFormStatusFields() {
