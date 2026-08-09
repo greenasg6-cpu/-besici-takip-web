@@ -264,6 +264,7 @@ const state = {
   search: '',
   filter: 'hepsi',
   detailTab: 'kilo',
+  adminTab: 'kullanici',
   moreScreen: null,
   listingId: null,
   postId: null,
@@ -484,18 +485,15 @@ function renderReminders(root) {
   }
   root.innerHTML = moreBackButton() + items
     .map((v) => {
-      const remaining = daysUntil(v.next_date);
-      const overdue = remaining < 0;
-      const dueText = overdue
-        ? `${Math.abs(remaining)} gün gecikti (${formatDate(v.next_date)})`
-        : remaining === 0
-          ? `Bugün (${formatDate(v.next_date)})`
-          : `${remaining} gün sonra (${formatDate(v.next_date)})`;
+      const info = vaccineStatusInfo(v);
       return `
-      <div class="card" style="cursor:pointer; ${overdue ? 'border-color: var(--red); background: var(--red-light);' : ''}" onclick="openAnimal(${v.animal_id})">
-        <div style="font-weight:700;">${escapeHtml(v.name)}</div>
-        <div style="font-size:12px;color:var(--muted);margin-top:2px;">${escapeHtml(v.ear_tag)}${v.animal_name ? ' · ' + escapeHtml(v.animal_name) : ''}</div>
-        <div style="font-size:13px;font-weight:600;color:${overdue ? 'var(--red)' : 'var(--amber)'};margin-top:6px;">${dueText}</div>
+      <div class="card" style="cursor:pointer;display:flex;gap:13px;align-items:center;border-color:${info.border};" onclick="openAnimal(${v.animal_id})">
+        <div style="width:12px;height:46px;border-radius:999px;background:${info.color};flex:none;"></div>
+        <div style="flex:1;">
+          <div style="font-size:17px;font-weight:800;">${escapeHtml(v.name)}</div>
+          <div style="font-size:13.5px;font-weight:600;color:var(--muted);margin-top:3px;">${escapeHtml(v.ear_tag)}${v.animal_name ? ' · ' + escapeHtml(v.animal_name) : ''}</div>
+        </div>
+        <div style="font-size:13.5px;font-weight:800;color:${info.color};text-align:right;flex:none;max-width:86px;line-height:1.3;">${info.label}</div>
       </div>`;
     })
     .join('');
@@ -515,19 +513,25 @@ function renderSummary(root) {
       <div class="stat-card"><div class="stat-icon">💵</div><div class="stat-value">${s.soldAnimals}</div><div class="stat-label">Satıldı</div></div>
       <div class="stat-card"><div class="stat-icon">⚠️</div><div class="stat-value">${s.deadAnimals}</div><div class="stat-label">Öldü</div></div>
     </div>
-    <div class="card">
-      <div style="font-weight:700; margin-bottom:8px;">Mali Durum</div>
-      <div class="finance-row"><span class="label">Toplam Alış Maliyeti</span><span class="value">${formatMoney(s.totalPurchases)}</span></div>
-      <div class="finance-row"><span class="label">Toplam Gider (yem, ilaç, vb.)</span><span class="value">${formatMoney(s.totalExpenses)}</span></div>
-      <div class="finance-row"><span class="label">Toplam Satış Geliri</span><span class="value">${formatMoney(s.totalSales)}</span></div>
-      <div class="finance-row finance-total"><span class="label">Net Kâr / Zarar</span><span class="value" style="color:${profit >= 0 ? 'var(--primary-dark)' : 'var(--red)'}">${formatMoney(profit)}</span></div>
+    <div class="card" style="background:var(--text);color:var(--bg);border:none;margin-top:12px;">
+      <div style="font-size:13.5px;font-weight:700;opacity:0.7;">NET KÂR</div>
+      <div style="font-family:var(--font-heading);font-size:38px;line-height:1.05;margin-top:6px;color:${profit >= 0 ? 'var(--sage-light)' : '#ffb2a0'};">${profit >= 0 ? '+' : ''}${formatMoney(profit)}</div>
+      <div style="display:flex;gap:5px;margin-top:18px;height:14px;border-radius:999px;overflow:hidden;">
+        <div style="flex:${Math.max(s.totalSales, 1)};background:var(--sage-light);"></div>
+        <div style="flex:${Math.max(s.totalPurchases, 1)};background:#f6a06b;"></div>
+        <div style="flex:${Math.max(s.totalExpenses, 1)};background:rgba(245,234,216,0.3);"></div>
+      </div>
+      <div style="display:flex;gap:16px;margin-top:11px;font-size:13px;font-weight:600;opacity:0.85;flex-wrap:wrap;">
+        <span>Satış ${formatMoney(s.totalSales)}</span><span>Alış ${formatMoney(s.totalPurchases)}</span><span>Gider ${formatMoney(s.totalExpenses)}</span>
+      </div>
     </div>
     <div class="card">
       <div style="display:flex; align-items:center; gap:10px;">
         <span style="font-size:20px;">💉</span>
-        <span style="font-size:13px;">Önümüzdeki 7 gün içinde <strong>${s.upcoming}</strong> aşı hatırlatıcısı var</span>
+        <span style="font-size:13.5px;font-weight:600;">Önümüzdeki 7 gün içinde <strong>${s.upcoming}</strong> aşı hatırlatıcısı var</span>
       </div>
     </div>
+    <button class="btn btn-ghost" onclick="exportBackup()">Tüm veriyi JSON olarak yedekle</button>
   `;
 }
 
@@ -756,31 +760,39 @@ function renderAccount(root) {
   }
   if (currentUser) {
     const p = currentUserProfile || {};
+    const initials = (p.displayName || currentUser.email || '?').trim().slice(0, 2).toUpperCase();
+    const maskedPhone = p.phone ? p.phone.replace(/(\d{4})\d+(\d{2})$/, '$1 *** ** $2') : '';
+    const rows = [
+      { label: 'Profil bilgileri', sub: 'Ad, telefon, şehir', on: 'openEditProfileForm()' },
+      { label: 'İlanlarım', sub: 'Pazar Yeri ilanların', on: "state.tab='market'; state.marketMineOnly=true; render();" },
+      { label: 'Gönderilerim', sub: 'Topluluk gönderilerin', on: "state.tab='community'; state.communityMineOnly=true; render();" },
+    ];
+    if (isAdminUser) rows.push({ label: '🛡️ Yönetici Paneli', sub: 'Kullanıcılar, ilanlar, gönderiler', on: "state.tab='more'; goMore('admin');" });
+    rows.push({ label: 'Çıkış yap', sub: 'Hayvan kayıtların telefonda kalır', on: 'logout()', danger: true });
+
     root.innerHTML = `
-      <div class="card">
-        <div style="display:flex; align-items:center; gap:12px;">
-          <div class="avatar" style="width:56px;height:56px;border-radius:28px;font-size:24px;">👤</div>
-          <div style="flex:1;">
-            <div style="font-size:18px;font-weight:800;">${escapeHtml(p.displayName || currentUser.email)}</div>
-            <div style="font-size:12px;color:var(--muted);">${escapeHtml(currentUser.email)}</div>
-          </div>
-          ${isAdminUser ? '<div class="badge badge-aktif">Yönetici</div>' : ''}
+      <div class="card" style="display:flex;gap:15px;align-items:center;">
+        <div class="avatar-initials" style="width:66px;height:66px;background:var(--primary);color:var(--bg);font-size:24px;">${escapeHtml(initials)}</div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-family:var(--font-heading);font-size:22px;line-height:1.1;">${escapeHtml(p.displayName || currentUser.email)}</div>
+          <div style="font-size:14px;font-weight:600;color:var(--muted);margin-top:4px;">${escapeHtml(p.city || '')}${p.city && maskedPhone ? ' · ' : ''}${escapeHtml(maskedPhone)}</div>
         </div>
-        <div style="height:1px;background:var(--border);margin:12px 0;"></div>
-        <div class="row"><span class="label">Telefon</span><span class="value">${escapeHtml(p.phone) || '-'}</span></div>
-        <div class="row"><span class="label">Şehir</span><span class="value">${escapeHtml(p.city) || '-'}</span></div>
-        <div class="btn-row" style="margin-top:14px;">
-          <button class="btn btn-secondary" onclick="openEditProfileForm()">Profili Düzenle</button>
-          <button class="btn btn-danger" onclick="logout()">Çıkış Yap</button>
-        </div>
+        ${isAdminUser ? '<div class="badge badge-aktif">Yönetici</div>' : ''}
       </div>
-      <div class="card">
-        <div class="btn-row">
-          <button class="btn btn-ghost" onclick="state.tab='market'; state.marketMineOnly=true; render();">İlanlarım</button>
-          <button class="btn btn-ghost" onclick="state.tab='community'; state.communityMineOnly=true; render();">Gönderilerim</button>
-        </div>
+      <div class="card" style="padding:0;overflow:hidden;">
+        ${rows
+          .map(
+            (r, i) => `
+        <div class="list-row" style="padding:17px 18px;${i === 0 ? 'border-top:none;' : ''}cursor:pointer;" onclick="${r.on}">
+          <div class="body"><div class="title" style="${r.danger ? 'color:var(--red);' : ''}">${r.label}</div><div class="subtitle">${r.sub}</div></div>
+          <span style="color:var(--faint);">›</span>
+        </div>`
+          )
+          .join('')}
       </div>
-      ${isAdminUser ? `<div class="card"><button class="btn btn-primary" onclick="state.tab='more'; goMore('admin');">🛡️ Yönetici Paneli</button></div>` : ''}
+      <div class="info-banner neutral" style="margin-top:14px;">
+        <div>Hayvanlar ve giderler yalnızca bu telefonda. Pazar Yeri, Topluluk ve hesabın internetten senkron — başka telefondan girince de görürsün.</div>
+      </div>
     `;
     return;
   }
@@ -933,23 +945,25 @@ async function renderMarket(root) {
 
     const cardsHtml = listings.length
       ? listings
-          .map(
-            (l) => `
-        <div class="animal-card" onclick="openListing('${l.id}')">
-          <div class="top">
-            <div class="avatar">${l.photoUrl ? `<img src="${l.photoUrl}" alt="">` : '🐄'}</div>
-            <div class="info">
-              <div class="ear-tag">${escapeHtml(l.title)}</div>
-              <div class="name">${escapeHtml(l.city || '')}${l.breed ? ' · ' + escapeHtml(l.breed) : ''}</div>
+          .map((l) => {
+            const mine = currentUser && l.sellerId === currentUser.uid;
+            const meta = [l.city, l.weight ? formatWeight(l.weight) : null, l.age].filter(Boolean).map(escapeHtml).join(' · ');
+            return `
+        <div class="card" style="padding:0;overflow:hidden;cursor:pointer;" onclick="openListing('${l.id}')">
+          <div class="photo-header" style="border-radius:0;height:150px;position:relative;">
+            ${l.photoUrl ? `<img src="${l.photoUrl}">` : 'ilan fotoğrafı'}
+            ${mine ? '<div class="badge" style="position:absolute;top:12px;left:12px;background:var(--text);color:var(--bg);">Benim ilanım</div>' : ''}
+            ${l.status === 'sold' ? '<div class="badge badge-satildi" style="position:absolute;top:12px;right:12px;">Satıldı</div>' : ''}
+          </div>
+          <div style="padding:14px 16px 16px;">
+            <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;">
+              <div style="font-size:17px;font-weight:800;line-height:1.3;flex:1;">${escapeHtml(l.title)}</div>
+              <div style="font-family:var(--font-heading);font-size:20px;color:var(--primary-active);white-space:nowrap;">${formatMoney(l.price)}</div>
             </div>
-            ${l.status === 'sold' ? '<div class="badge badge-satildi">Satıldı</div>' : ''}
+            ${meta ? `<div style="font-size:14px;font-weight:600;color:var(--muted);margin-top:8px;">${meta}</div>` : ''}
           </div>
-          <div class="bottom">
-            <span>${escapeHtml(l.sellerName || '')}</span>
-            <span class="weight">${formatMoney(l.price)}</span>
-          </div>
-        </div>`
-          )
+        </div>`;
+          })
           .join('')
       : `<div class="empty-state"><strong>${state.marketMineOnly ? 'Henüz ilanın yok' : 'Henüz ilan yok'}</strong>${state.marketMineOnly ? '' : 'İlk ilanı sen ver!'}</div>`;
 
@@ -958,11 +972,10 @@ async function renderMarket(root) {
         <span>🔍</span>
         <input id="market-search-input" type="text" placeholder="Hayvan, şehir veya ırk ara..." value="${escapeHtml(state.marketSearch)}">
       </div>
-      ${
-        state.marketMineOnly
-          ? `<div class="chip-row"><div class="chip active" onclick="state.marketMineOnly=false; render();">Tüm ilanlar</div></div>`
-          : ''
-      }
+      <div class="chip-row">
+        <div class="chip ${!state.marketMineOnly ? 'active' : ''}" onclick="state.marketMineOnly=false; render();">Tümü</div>
+        <div class="chip ${state.marketMineOnly ? 'active' : ''}" onclick="state.marketMineOnly=true; render();">Benim ilanlarım</div>
+      </div>
       ${cardsHtml}
       <button class="fab" onclick="openListingForm()">+</button>
     `;
@@ -994,38 +1007,65 @@ async function renderListingDetail(root, id) {
     const l = doc.data();
     const isOwner = currentUser && l.sellerId === currentUser.uid;
     const phoneDigits = (l.sellerPhone || '').replace(/\D/g, '');
+    const specs = [
+      l.species ? { k: 'Tür', v: l.species } : null,
+      l.breed ? { k: 'Irk', v: l.breed } : null,
+      l.weight ? { k: 'Ağırlık', v: formatWeight(l.weight) } : null,
+      l.age ? { k: 'Yaş', v: l.age } : null,
+    ].filter(Boolean);
+    const initials = (l.sellerName || '?').trim().slice(0, 2).toUpperCase();
+
     root.innerHTML = `
       <button class="btn btn-ghost" style="margin-bottom:12px;" onclick="state.listingId=null; render();">← Geri</button>
-      <div class="card">
-        ${l.photoUrl ? `<img src="${l.photoUrl}" style="width:100%;border-radius:12px;margin-bottom:12px;cursor:zoom-in;" onclick="openPhotoLightbox('${l.photoUrl}')">` : ''}
-        <div style="font-size:20px;font-weight:800;">${escapeHtml(l.title)}</div>
-        <div style="font-size:22px;font-weight:800;color:var(--primary-dark);margin-top:4px;">${formatMoney(l.price)}</div>
-        ${l.status === 'sold' ? '<div class="badge badge-satildi" style="margin-top:8px;">Satıldı</div>' : ''}
-        <div style="height:1px;background:var(--border);margin:12px 0;"></div>
-        <div class="row"><span class="label">Tür / Irk</span><span class="value">${escapeHtml(l.species || '')}${l.breed ? ' · ' + escapeHtml(l.breed) : ''}</span></div>
-        <div class="row"><span class="label">Ağırlık</span><span class="value">${l.weight ? formatWeight(l.weight) : '-'}</span></div>
-        <div class="row"><span class="label">Yaş</span><span class="value">${escapeHtml(l.age) || '-'}</span></div>
-        <div class="row"><span class="label">Şehir</span><span class="value">${escapeHtml(l.city) || '-'}</span></div>
-        ${l.description ? `<div class="row"><span class="label">Açıklama</span><span class="value">${escapeHtml(l.description)}</span></div>` : ''}
-        <div class="row"><span class="label">Satıcı</span><span class="value">${escapeHtml(l.sellerName || '')}</span></div>
-        <div class="row"><span class="label">Tarih</span><span class="value">${timeAgoOrDate(l.createdAt)}</span></div>
+
+      ${
+        l.photoUrl
+          ? `<div class="photo-header" style="height:220px;" onclick="openPhotoLightbox('${l.photoUrl}')"><img src="${l.photoUrl}"></div>`
+          : `<div class="photo-header" style="height:220px;">ilan fotoğrafı</div>`
+      }
+
+      <div style="padding-top:18px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="font-family:var(--font-heading);font-size:34px;line-height:1.05;color:var(--primary-active);">${formatMoney(l.price)}</div>
+          ${l.status === 'sold' ? '<div class="badge badge-satildi">Satıldı</div>' : ''}
+        </div>
+        <div style="font-size:20px;font-weight:800;margin-top:8px;line-height:1.3;">${escapeHtml(l.title)}</div>
+        <div style="font-size:14.5px;font-weight:600;color:var(--muted);margin-top:6px;">${escapeHtml(l.city || '')} · ${timeAgoOrDate(l.createdAt)}</div>
+
+        ${
+          specs.length
+            ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:18px 0;">
+                ${specs.map((s) => `<div class="card" style="padding:13px 15px;margin-bottom:0;"><div style="font-size:13px;font-weight:700;color:var(--muted);">${s.k}</div><div style="font-size:17px;font-weight:800;margin-top:3px;">${escapeHtml(s.v)}</div></div>`).join('')}
+              </div>`
+            : ''
+        }
+
+        ${l.description ? `<div style="font-size:15.5px;font-weight:500;line-height:1.6;color:var(--text-soft);">${escapeHtml(l.description)}</div>` : ''}
+
+        <div class="card" style="margin-top:18px;display:flex;align-items:center;gap:14px;">
+          <div class="avatar-initials" style="width:54px;height:54px;background:var(--sage);color:var(--card);font-size:19px;">${escapeHtml(initials)}</div>
+          <div style="flex:1;"><div style="font-size:17px;font-weight:800;">${escapeHtml(l.sellerName || '')}</div><div style="font-size:13.5px;font-weight:600;color:var(--muted);margin-top:2px;">${escapeHtml(l.city || '')}</div></div>
+        </div>
+
+        ${
+          phoneDigits
+            ? `<div class="btn-row" style="margin-top:14px;">
+                <a class="btn btn-primary" style="text-decoration:none;background:var(--text);color:var(--bg);" href="tel:${phoneDigits}">📞 Ara</a>
+                <a class="btn btn-primary" style="text-decoration:none;" href="https://wa.me/${phoneDigits}" target="_blank" rel="noopener">💬 WhatsApp</a>
+              </div>`
+            : ''
+        }
+        <div style="margin-top:14px;font-size:13px;font-weight:600;color:var(--muted);text-align:center;line-height:1.5;">Alışveriş satıcıyla aranızda — uygulamada ödeme yok.</div>
+
+        ${
+          isOwner || isAdminUser
+            ? `<div class="btn-row" style="margin-top:16px;">
+                ${l.status !== 'sold' ? `<button class="btn btn-ghost" onclick="markListingSold('${id}')">Satıldı Olarak İşaretle</button>` : ''}
+                <button class="btn btn-danger" onclick="confirmDeleteListing('${id}')">Sil</button>
+              </div>`
+            : ''
+        }
       </div>
-      ${
-        phoneDigits
-          ? `<div class="btn-row">
-              <a class="btn btn-primary" style="text-decoration:none;" href="tel:${phoneDigits}">📞 Ara</a>
-              <a class="btn btn-secondary" style="text-decoration:none;" href="https://wa.me/${phoneDigits}" target="_blank" rel="noopener">💬 WhatsApp</a>
-            </div>`
-          : ''
-      }
-      ${
-        isOwner || isAdminUser
-          ? `<div class="btn-row" style="margin-top:10px;">
-              ${l.status !== 'sold' ? `<button class="btn btn-secondary" onclick="markListingSold('${id}')">Satıldı Olarak İşaretle</button>` : ''}
-              <button class="btn btn-danger" onclick="confirmDeleteListing('${id}')">Sil</button>
-            </div>`
-          : ''
-      }
     `;
   } catch (e) {
     root.innerHTML = `<div class="empty-state"><strong>Yüklenemedi</strong>${escapeHtml(e.message)}</div>`;
@@ -1197,29 +1237,30 @@ async function renderCommunity(root) {
 
     const html = posts.length
       ? posts
-          .map(
-            (p) => `
+          .map((p) => {
+            const initials = (p.authorName || '?').trim().slice(0, 2).toUpperCase();
+            return `
         <div class="card" style="cursor:pointer;" onclick="openPost('${p.id}')">
-          <div style="display:flex; gap:10px;">
-            ${p.photoUrl ? `<img src="${p.photoUrl}" style="width:56px;height:56px;border-radius:10px;object-fit:cover;flex-shrink:0;">` : ''}
-            <div style="flex:1; min-width:0;">
-              <div style="font-weight:700; font-size:15px;">${escapeHtml(p.title)}</div>
-              <div style="font-size:12px;color:var(--muted);margin-top:2px;">${escapeHtml(p.authorName || '')} · ${timeAgoOrDate(p.createdAt)}</div>
-              <div style="font-size:13px;color:var(--muted);margin-top:6px; overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;">${escapeHtml(p.body || '')}</div>
-              <div style="font-size:12px;color:var(--primary-dark);margin-top:6px;font-weight:600;">💬 ${p.commentCount || 0} yorum</div>
-            </div>
+          <div style="display:flex;gap:12px;align-items:center;">
+            <div class="avatar-initials" style="width:44px;height:44px;background:var(--sage-light);color:var(--sage-dark);font-size:16px;">${escapeHtml(initials)}</div>
+            <div style="flex:1;"><div style="font-size:16px;font-weight:800;">${escapeHtml(p.authorName || '')}</div><div style="font-size:13px;font-weight:600;color:var(--muted);margin-top:2px;">${escapeHtml(p.authorCity || '')}${p.authorCity ? ' · ' : ''}${timeAgoOrDate(p.createdAt)}</div></div>
           </div>
-        </div>`
-          )
+          <div style="font-size:15px;font-weight:700;margin-top:12px;">${escapeHtml(p.title)}</div>
+          <div style="font-size:14.5px;font-weight:500;line-height:1.5;margin-top:6px;color:var(--text-soft);overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">${escapeHtml(p.body || '')}</div>
+          ${p.photoUrl ? `<img src="${p.photoUrl}" style="width:100%;height:140px;object-fit:cover;border-radius:24px;margin-top:12px;">` : ''}
+          <div style="margin-top:14px;">
+            <span style="height:40px;padding:0 16px;border-radius:999px;display:inline-flex;align-items:center;font-size:13.5px;font-weight:700;color:var(--muted);border:1px solid var(--border);">💬 ${p.commentCount || 0} cevap</span>
+          </div>
+        </div>`;
+          })
           .join('')
       : `<div class="empty-state"><strong>${state.communityMineOnly ? 'Henüz gönderin yok' : 'Henüz gönderi yok'}</strong>${state.communityMineOnly ? '' : 'Hayvanınla ilgili bir soru veya durum paylaşabilirsin.'}</div>`;
 
     root.innerHTML = `
-      ${
-        state.communityMineOnly
-          ? `<div class="chip-row"><div class="chip active" onclick="state.communityMineOnly=false; render();">Tüm gönderiler</div></div>`
-          : ''
-      }
+      <div class="chip-row">
+        <div class="chip ${!state.communityMineOnly ? 'active' : ''}" onclick="state.communityMineOnly=false; render();">Tümü</div>
+        <div class="chip ${state.communityMineOnly ? 'active' : ''}" onclick="state.communityMineOnly=true; render();">Benim gönderilerim</div>
+      </div>
       ${html}
       <button class="fab" onclick="openPostForm()">+</button>
     `;
@@ -1250,13 +1291,17 @@ async function renderPostDetail(root, id) {
     const isOwner = currentUser && p.authorId === currentUser.uid;
     const comments = commentsSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
 
+    const initials = (p.authorName || '?').trim().slice(0, 2).toUpperCase();
     root.innerHTML = `
       <button class="btn btn-ghost" style="margin-bottom:12px;" onclick="state.postId=null; render();">← Geri</button>
       <div class="card">
-        ${p.photoUrl ? `<img src="${p.photoUrl}" style="width:100%;border-radius:12px;margin-bottom:12px;cursor:zoom-in;" onclick="openPhotoLightbox('${p.photoUrl}')">` : ''}
-        <div style="font-size:18px;font-weight:800;">${escapeHtml(p.title)}</div>
-        <div style="font-size:12px;color:var(--muted);margin-top:4px;">${escapeHtml(p.authorName || '')} · ${timeAgoOrDate(p.createdAt)}</div>
-        <div style="font-size:14px;margin-top:10px;white-space:pre-wrap;">${escapeHtml(p.body || '')}</div>
+        <div style="display:flex;gap:12px;align-items:center;">
+          <div class="avatar-initials" style="width:44px;height:44px;background:var(--sage-light);color:var(--sage-dark);font-size:16px;">${escapeHtml(initials)}</div>
+          <div style="flex:1;"><div style="font-size:16px;font-weight:800;">${escapeHtml(p.authorName || '')}</div><div style="font-size:13px;font-weight:600;color:var(--muted);margin-top:2px;">${escapeHtml(p.authorCity || '')}${p.authorCity ? ' · ' : ''}${timeAgoOrDate(p.createdAt)}</div></div>
+        </div>
+        <div style="font-size:18px;font-weight:800;margin-top:14px;">${escapeHtml(p.title)}</div>
+        <div style="font-size:15px;font-weight:500;margin-top:8px;white-space:pre-wrap;line-height:1.55;color:var(--text-soft);">${escapeHtml(p.body || '')}</div>
+        ${p.photoUrl ? `<img src="${p.photoUrl}" style="width:100%;border-radius:24px;margin-top:12px;cursor:zoom-in;" onclick="openPhotoLightbox('${p.photoUrl}')">` : ''}
         ${
           isOwner || isAdminUser
             ? `<div class="btn-row" style="margin-top:14px;"><button class="btn btn-danger" onclick="confirmDeletePost('${id}')">Gönderiyi Sil</button></div>`
@@ -1405,6 +1450,7 @@ async function submitPostForm() {
     const docRef = await db.collection('posts').add({
       authorId: currentUser.uid,
       authorName: (currentUserProfile && currentUserProfile.displayName) || currentUser.email,
+      authorCity: (currentUserProfile && currentUserProfile.city) || null,
       title,
       body,
       photoUrl: null,
@@ -1432,24 +1478,26 @@ async function submitPostForm() {
 
 function renderMoreMenu(root) {
   setTitle('Diğer');
+  const reminderCount = upcomingVaccinations(7).length;
+  const rows = [
+    { label: 'Hatırlatıcılar', sub: 'Yaklaşan ve geciken aşılar', icon: '💉', bg: 'var(--primary-light)', badge: reminderCount || null, on: 'reminders' },
+    { label: 'Özet', sub: 'Alış, satış, gider ve net kâr', icon: '📊', bg: 'var(--sage-light)', badge: null, on: 'summary' },
+    { label: 'Yedekleme', sub: 'JSON indir / cihazdan yükle', icon: '⬇️', bg: 'var(--card-alt)', badge: null, on: 'settings' },
+  ];
+  if (isAdminUser) rows.push({ label: 'Yönetici Paneli', sub: 'Kullanıcılar, ilanlar, gönderiler', icon: '🛡️', bg: 'var(--primary-light)', badge: null, on: 'admin' });
+
   root.innerHTML = `
-    <div class="card" style="padding:0; overflow:hidden;">
-      <div class="list-row" style="border-top:none; padding:14px 16px; cursor:pointer;" onclick="goMore('reminders')">
-        <div class="body"><div class="title">💉 Aşı Hatırlatıcıları</div></div>
-      </div>
-      <div class="list-row" style="padding:14px 16px; cursor:pointer;" onclick="goMore('summary')">
-        <div class="body"><div class="title">📊 Çiftlik Özeti</div></div>
-      </div>
-      <div class="list-row" style="padding:14px 16px; cursor:pointer;" onclick="goMore('settings')">
-        <div class="body"><div class="title">⚙️ Ayarlar / Yedekleme</div></div>
-      </div>
-      ${
-        isAdminUser
-          ? `<div class="list-row" style="padding:14px 16px; cursor:pointer;" onclick="goMore('admin')">
-              <div class="body"><div class="title">🛡️ Yönetici Paneli</div></div>
-            </div>`
-          : ''
-      }
+    <div style="display:flex;flex-direction:column;gap:12px;">
+      ${rows
+        .map(
+          (r) => `
+      <div class="card" style="display:flex;align-items:center;gap:14px;cursor:pointer;padding:17px 18px;" onclick="goMore('${r.on}')">
+        <div style="width:46px;height:46px;border-radius:999px;background:${r.bg};display:flex;align-items:center;justify-content:center;flex:none;font-size:20px;">${r.icon}</div>
+        <div style="flex:1;"><div style="font-size:17.5px;font-weight:800;">${r.label}</div><div style="font-size:13.5px;font-weight:600;color:var(--muted);margin-top:2px;">${r.sub}</div></div>
+        ${r.badge ? `<div style="height:32px;min-width:32px;padding:0 11px;border-radius:999px;background:var(--primary);color:var(--bg);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;flex:none;">${r.badge}</div>` : ''}
+      </div>`
+        )
+        .join('')}
     </div>
   `;
 }
@@ -1473,54 +1521,63 @@ async function renderAdmin(root) {
     const listings = listingsSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
     const posts = postsSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
 
+    const userRows = users
+      .map((u) => {
+        const initials = (u.displayName || u.email || '?').trim().slice(0, 2).toUpperCase();
+        return `
+      <div class="card" style="display:flex;gap:12px;align-items:center;">
+        <div class="avatar-initials" style="width:44px;height:44px;background:var(--card-alt);color:var(--muted);font-size:15px;">${escapeHtml(initials)}</div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:16px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(u.displayName || u.email)}</div>
+          <div style="font-size:13px;font-weight:600;color:var(--muted);margin-top:2px;">${escapeHtml(u.city || '')}${u.banned ? ' · Engelli' : ''}${u.muted ? ' · Susturulmuş' : ''}</div>
+        </div>
+        <button class="chip" style="height:44px;${u.banned ? 'background:var(--red-light);color:var(--red-deep);border-color:var(--red);' : ''}" onclick="toggleUserFlag('${u.id}','banned',${!u.banned})">${u.banned ? 'Engeli Kaldır' : 'Engelle'}</button>
+      </div>`;
+      })
+      .join('');
+
+    const listingRows = listings
+      .map(
+        (l) => `
+      <div class="card" style="display:flex;gap:12px;align-items:center;">
+        <div style="flex:1;min-width:0;"><div style="font-size:16px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(l.title)}</div><div style="font-size:13px;font-weight:600;color:var(--muted);margin-top:2px;">${escapeHtml(l.sellerName || '')} · ${formatMoney(l.price)}</div></div>
+        <button class="chip" style="height:44px;background:var(--red-light);color:var(--red-deep);border-color:var(--red);" onclick="adminDeleteListing('${l.id}')">Sil</button>
+      </div>`
+      )
+      .join('');
+
+    const postRows = posts
+      .map(
+        (p) => `
+      <div class="card" style="display:flex;gap:12px;align-items:center;">
+        <div style="flex:1;min-width:0;"><div style="font-size:16px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(p.title)}</div><div style="font-size:13px;font-weight:600;color:var(--muted);margin-top:2px;">${escapeHtml(p.authorName || '')}</div></div>
+        <button class="chip" style="height:44px;background:var(--red-light);color:var(--red-deep);border-color:var(--red);" onclick="adminDeletePost('${p.id}')">Sil</button>
+      </div>`
+      )
+      .join('');
+
+    const tabs = [
+      ['kullanici', `Kullanıcılar (${users.length})`],
+      ['ilan', `İlanlar (${listings.length})`],
+      ['gonderi', `Gönderiler (${posts.length})`],
+    ];
+    const bodies = { kullanici: userRows || '<div class="empty-state">Kullanıcı yok</div>', ilan: listingRows || '<div class="empty-state">İlan yok</div>', gonderi: postRows || '<div class="empty-state">Gönderi yok</div>' };
+
     root.innerHTML = `
       ${moreBackButton()}
-      <div class="card">
-        <div class="section-title-row"><h3>Kullanıcılar (${users.length})</h3></div>
-        ${users
-          .map(
-            (u) => `
-          <div class="list-row">
-            <div class="body">
-              <div class="title">${escapeHtml(u.displayName || u.email)} ${u.banned ? '<span class="badge badge-oldu">Engelli</span>' : ''} ${u.muted ? '<span class="badge badge-kesildi">Susturulmuş</span>' : ''}</div>
-              <div class="subtitle">${escapeHtml(u.email || '')} · ${escapeHtml(u.city || '')}</div>
-            </div>
-            <div style="display:flex; gap:6px;">
-              <button class="delete-btn" style="font-size:12px;" onclick="toggleUserFlag('${u.id}','banned',${!u.banned})">${u.banned ? 'Engeli Kaldır' : 'Engelle'}</button>
-              <button class="delete-btn" style="font-size:12px;" onclick="toggleUserFlag('${u.id}','muted',${!u.muted})">${u.muted ? 'Sesi Aç' : 'Sustur'}</button>
-            </div>
-          </div>`
-          )
-          .join('')}
+      <div class="seg-row">
+        ${tabs.map(([k, l]) => `<div class="seg-opt ${state.adminTab === k ? 'active' : ''}" onclick="setAdminTab('${k}')">${l}</div>`).join('')}
       </div>
-      <div class="card">
-        <div class="section-title-row"><h3>İlanlar (${listings.length})</h3></div>
-        ${listings
-          .map(
-            (l) => `
-          <div class="list-row">
-            <div class="body"><div class="title">${escapeHtml(l.title)}</div><div class="subtitle">${escapeHtml(l.sellerName || '')} · ${formatMoney(l.price)}</div></div>
-            <button class="delete-btn" onclick="adminDeleteListing('${l.id}')">🗑</button>
-          </div>`
-          )
-          .join('')}
-      </div>
-      <div class="card">
-        <div class="section-title-row"><h3>Gönderiler (${posts.length})</h3></div>
-        ${posts
-          .map(
-            (p) => `
-          <div class="list-row">
-            <div class="body"><div class="title">${escapeHtml(p.title)}</div><div class="subtitle">${escapeHtml(p.authorName || '')}</div></div>
-            <button class="delete-btn" onclick="adminDeletePost('${p.id}')">🗑</button>
-          </div>`
-          )
-          .join('')}
-      </div>
+      ${bodies[state.adminTab]}
     `;
   } catch (e) {
     root.innerHTML = `${moreBackButton()}<div class="empty-state"><strong>Yüklenemedi</strong>${escapeHtml(e.message)}</div>`;
   }
+}
+
+function setAdminTab(tab) {
+  state.adminTab = tab;
+  render();
 }
 
 async function toggleUserFlag(uid, field, value) {
