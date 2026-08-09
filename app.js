@@ -49,6 +49,10 @@ function toNumberOrNull(text) {
   return Number.isNaN(n) ? null : n;
 }
 
+function cowIconSvg(size) {
+  return `<svg viewBox="0 0 120 120" width="${size}" height="${size}"><ellipse cx="38" cy="52" rx="15" ry="10" fill="#7a8a5e"></ellipse><ellipse cx="82" cy="52" rx="15" ry="10" fill="#7a8a5e"></ellipse><circle cx="60" cy="58" r="26" fill="#7a8a5e"></circle><ellipse cx="60" cy="72" rx="15" ry="11" fill="#e1eecc"></ellipse><circle cx="54" cy="71" r="2.6" fill="#7a8a5e"></circle><circle cx="66" cy="71" r="2.6" fill="#7a8a5e"></circle></svg>`;
+}
+
 let toastTimer = null;
 function toast(message) {
   const el = document.getElementById('toast');
@@ -265,6 +269,7 @@ const state = {
   filter: 'hepsi',
   detailTab: 'kilo',
   adminTab: 'kullanici',
+  moderationMode: false,
   moreScreen: null,
   listingId: null,
   postId: null,
@@ -406,7 +411,7 @@ function renderAnimalsList(root) {
           const gain = dailyGainFor(a);
           const avatar = a.photo_uri
             ? `<img src="${a.photo_uri}" alt="" onclick="event.stopPropagation(); openPhotoLightbox('${a.photo_uri}')">`
-            : '🐄';
+            : cowIconSvg(42);
           const genderBadge = a.gender
             ? `<span class="badge badge-${a.gender === 'erkek' ? 'erkek' : 'disi'}">${a.gender === 'erkek' ? 'Erkek' : 'Dişi'}</span>`
             : '';
@@ -431,7 +436,10 @@ function renderAnimalsList(root) {
         </div>`;
         })
         .join('')
-    : `<div class="empty-state"><strong>Henüz hayvan eklenmemiş</strong>Sağ alttaki + butonuyla ilk hayvanınızı ekleyin.</div>`;
+    : `<div class="empty-state">
+        <svg viewBox="0 0 160 160" width="140" height="140"><circle cx="80" cy="80" r="76" fill="#e1eecc"></circle><g fill="none" stroke="#7a8a5e" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"><path d="M26 74 L80 34 L134 74"></path><rect x="36" y="74" width="88" height="56" rx="16"></rect><rect x="66" y="98" width="28" height="32" rx="12"></rect></g><circle cx="52" cy="94" r="7" fill="#7a8a5e"></circle><circle cx="108" cy="94" r="7" fill="#7a8a5e"></circle></svg>
+        <strong>Henüz hayvan eklenmemiş</strong>Sağ alttaki + butonuyla ilk hayvanınızı ekleyin.
+      </div>`;
 
   root.innerHTML = `
     <div class="chip-row">
@@ -790,6 +798,16 @@ function renderAccount(root) {
           )
           .join('')}
       </div>
+      ${
+        isAdminUser
+          ? `<div class="card" style="background:var(--text);display:flex;align-items:center;gap:14px;cursor:pointer;margin-top:14px;" onclick="toggleModerationMode()">
+              <div style="flex:1;"><div style="font-size:16.5px;font-weight:800;color:var(--bg);">Denetim modu</div><div style="font-size:13px;font-weight:600;color:rgba(245,234,216,0.7);margin-top:3px;">${state.moderationMode ? 'Açık — ilan ve gönderilerde "Kaldır" butonu görünüyor' : 'Kapalı — normal kullanıcı görünümü'}</div></div>
+              <div style="width:56px;height:32px;border-radius:999px;background:${state.moderationMode ? 'var(--primary)' : 'rgba(245,234,216,0.25)'};padding:4px;display:flex;justify-content:${state.moderationMode ? 'flex-end' : 'flex-start'};flex:none;">
+                <div style="width:24px;height:24px;border-radius:999px;background:var(--bg);"></div>
+              </div>
+            </div>`
+          : ''
+      }
       <div class="info-banner neutral" style="margin-top:14px;">
         <div>Hayvanlar ve giderler yalnızca bu telefonda. Pazar Yeri, Topluluk ve hesabın internetten senkron — başka telefondan girince de görürsün.</div>
       </div>
@@ -884,7 +902,21 @@ async function submitRegister() {
 function logout() {
   auth.signOut();
   state.tab = 'animals';
+  state.moderationMode = false;
   render();
+}
+
+function toggleModerationMode() {
+  state.moderationMode = !state.moderationMode;
+  render();
+}
+
+function moderationBannerHtml() {
+  if (!(isAdminUser && state.moderationMode)) return '';
+  return `<div style="margin-bottom:14px;background:var(--text);border-radius:24px;padding:13px 16px;display:flex;align-items:center;gap:11px;">
+    <span style="font-size:16px;">🛡️</span>
+    <div style="flex:1;font-size:13.5px;font-weight:700;color:var(--bg);line-height:1.4;">Denetim modu açık — ilan ve gönderileri kaldırabilirsin.</div>
+  </div>`;
 }
 
 function openEditProfileForm() {
@@ -951,7 +983,7 @@ async function renderMarket(root) {
             return `
         <div class="card" style="padding:0;overflow:hidden;cursor:pointer;" onclick="openListing('${l.id}')">
           <div class="photo-header" style="border-radius:0;height:150px;position:relative;">
-            ${l.photoUrl ? `<img src="${l.photoUrl}">` : 'ilan fotoğrafı'}
+            ${l.photoUrl ? `<img src="${l.photoUrl}">` : cowIconSvg(52)}
             ${mine ? '<div class="badge" style="position:absolute;top:12px;left:12px;background:var(--text);color:var(--bg);">Benim ilanım</div>' : ''}
             ${l.status === 'sold' ? '<div class="badge badge-satildi" style="position:absolute;top:12px;right:12px;">Satıldı</div>' : ''}
           </div>
@@ -961,13 +993,24 @@ async function renderMarket(root) {
               <div style="font-family:var(--font-heading);font-size:20px;color:var(--primary-active);white-space:nowrap;">${formatMoney(l.price)}</div>
             </div>
             ${meta ? `<div style="font-size:14px;font-weight:600;color:var(--muted);margin-top:8px;">${meta}</div>` : ''}
+            ${
+              isAdminUser && state.moderationMode
+                ? `<div style="margin-top:13px;padding-top:13px;border-top:1px dashed var(--border);display:flex;justify-content:flex-end;">
+                    <button class="chip" style="height:40px;background:var(--red-light);color:var(--red-deep);border-color:var(--red);" onclick="event.stopPropagation(); adminDeleteListing('${l.id}')">🗑 Kaldır</button>
+                  </div>`
+                : ''
+            }
           </div>
         </div>`;
           })
           .join('')
-      : `<div class="empty-state"><strong>${state.marketMineOnly ? 'Henüz ilanın yok' : 'Henüz ilan yok'}</strong>${state.marketMineOnly ? '' : 'İlk ilanı sen ver!'}</div>`;
+      : `<div class="empty-state">
+          <svg viewBox="0 0 160 160" width="140" height="140"><circle cx="80" cy="80" r="76" fill="#e1eecc"></circle><g fill="none" stroke="#7a8a5e" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"><rect x="30" y="52" width="100" height="60" rx="18"></rect><path d="M52 112 L44 132"></path><path d="M108 112 L116 132"></path><path d="M30 74 H130"></path></g><circle cx="60" cy="63" r="5" fill="#7a8a5e"></circle><circle cx="100" cy="94" r="12" fill="none" stroke="#c67139" stroke-width="6"></circle></svg>
+          <strong>${state.marketMineOnly ? 'Henüz ilanın yok' : 'Henüz ilan yok'}</strong>${state.marketMineOnly ? '' : 'İlk ilanı sen ver!'}
+        </div>`;
 
     root.innerHTML = `
+      ${moderationBannerHtml()}
       <div class="search-row">
         <span>🔍</span>
         <input id="market-search-input" type="text" placeholder="Hayvan, şehir veya ırk ara..." value="${escapeHtml(state.marketSearch)}">
@@ -1021,7 +1064,7 @@ async function renderListingDetail(root, id) {
       ${
         l.photoUrl
           ? `<div class="photo-header" style="height:220px;" onclick="openPhotoLightbox('${l.photoUrl}')"><img src="${l.photoUrl}"></div>`
-          : `<div class="photo-header" style="height:220px;">ilan fotoğrafı</div>`
+          : `<div class="photo-header" style="height:220px;">${cowIconSvg(64)}</div>`
       }
 
       <div style="padding-top:18px;">
@@ -1248,8 +1291,13 @@ async function renderCommunity(root) {
           <div style="font-size:15px;font-weight:700;margin-top:12px;">${escapeHtml(p.title)}</div>
           <div style="font-size:14.5px;font-weight:500;line-height:1.5;margin-top:6px;color:var(--text-soft);overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">${escapeHtml(p.body || '')}</div>
           ${p.photoUrl ? `<img src="${p.photoUrl}" style="width:100%;height:140px;object-fit:cover;border-radius:24px;margin-top:12px;">` : ''}
-          <div style="margin-top:14px;">
+          <div style="margin-top:14px;display:flex;align-items:center;gap:10px;">
             <span style="height:40px;padding:0 16px;border-radius:999px;display:inline-flex;align-items:center;font-size:13.5px;font-weight:700;color:var(--muted);border:1px solid var(--border);">💬 ${p.commentCount || 0} cevap</span>
+            ${
+              isAdminUser && state.moderationMode
+                ? `<button class="chip" style="height:40px;background:var(--red-light);color:var(--red-deep);border-color:var(--red);" onclick="event.stopPropagation(); adminDeletePost('${p.id}')">🗑 Kaldır</button>`
+                : ''
+            }
           </div>
         </div>`;
           })
@@ -1257,6 +1305,7 @@ async function renderCommunity(root) {
       : `<div class="empty-state"><strong>${state.communityMineOnly ? 'Henüz gönderin yok' : 'Henüz gönderi yok'}</strong>${state.communityMineOnly ? '' : 'Hayvanınla ilgili bir soru veya durum paylaşabilirsin.'}</div>`;
 
     root.innerHTML = `
+      ${moderationBannerHtml()}
       <div class="chip-row">
         <div class="chip ${!state.communityMineOnly ? 'active' : ''}" onclick="state.communityMineOnly=false; render();">Tümü</div>
         <div class="chip ${state.communityMineOnly ? 'active' : ''}" onclick="state.communityMineOnly=true; render();">Benim gönderilerim</div>
@@ -1594,7 +1643,10 @@ function adminDeleteListing(id) {
   db.collection('listings')
     .doc(id)
     .delete()
-    .then(() => renderAdmin(document.getElementById('view-root')))
+    .then(() => {
+      toast('İlan kaldırıldı');
+      render();
+    })
     .catch((e) => alert('Hata: ' + e.message));
 }
 
@@ -1603,7 +1655,10 @@ function adminDeletePost(id) {
   db.collection('posts')
     .doc(id)
     .delete()
-    .then(() => renderAdmin(document.getElementById('view-root')))
+    .then(() => {
+      toast('Gönderi kaldırıldı');
+      render();
+    })
     .catch((e) => alert('Hata: ' + e.message));
 }
 
@@ -1743,7 +1798,7 @@ function renderDetail(root, id) {
     ${
       animal.photo_uri
         ? `<div class="photo-header" onclick="openPhotoLightbox('${animal.photo_uri}')"><img src="${animal.photo_uri}"></div>`
-        : `<div class="photo-header">hayvan fotoğrafı — dokun, büyüsün</div>`
+        : `<div class="photo-header" style="cursor:pointer;" onclick="openAnimalForm(${id})">${cowIconSvg(56)}</div>`
     }
 
     <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin:14px 0 4px;">
