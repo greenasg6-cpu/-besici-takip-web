@@ -2344,9 +2344,9 @@ function openAnimalForm(existingId) {
       </div>
 
       <label class="field"><span class="field-label">Doğum Tarihi</span>
-        <input type="date" id="af-birth-date" value="${a.birth_date || ''}"></label>
+        <input type="date" id="af-birth-date" value="${a.birth_date || ''}" min="1990-01-01" max="${todayIso()}"></label>
       <label class="field"><span class="field-label">Çiftliğe Giriş Tarihi <span class="required">*</span></span>
-        <input type="date" id="af-entry-date" value="${a.entry_date}"></label>
+        <input type="date" id="af-entry-date" value="${a.entry_date}" min="1990-01-01" max="${todayIso()}"></label>
 
       <div style="display:flex;gap:10px;">
         <label class="field" style="flex:1;"><span class="field-label">Giriş Kilosu (kg)</span>
@@ -2375,7 +2375,7 @@ function openAnimalForm(existingId) {
 
       <div id="af-exit-fields" class="${a.status === 'aktif' ? 'hidden' : ''}">
         <label class="field"><span class="field-label">Çıkış / Satış Tarihi</span>
-          <input type="date" id="af-exit-date" value="${a.exit_date || ''}"></label>
+          <input type="date" id="af-exit-date" value="${a.exit_date || ''}" min="1990-01-01" max="${todayIso()}"></label>
       </div>
       <div id="af-sale-fields" class="${a.status === 'satildi' ? '' : 'hidden'}">
         <label class="field"><span class="field-label">Satış Kilosu (kg)</span>
