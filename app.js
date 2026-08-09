@@ -369,13 +369,9 @@ function requireLogin(actionLabel) {
 
 /* ---------------- Animals list ---------------- */
 
-function renderAnimalsList(root) {
-  setTitle('Hayvanlarım');
-
+function filteredAnimalsForList() {
   const allAnimals = listAnimals();
   const activeAnimals = allAnimals.filter((a) => a.status === 'aktif');
-  const pens = distinctPens();
-  const attention = animalIdsNeedingAttention(14);
 
   let list;
   if (state.filter === 'satildi_hepsi') {
@@ -396,26 +392,20 @@ function renderAnimalsList(root) {
     );
   }
 
-  const filters = [['hepsi', 'Hepsi']]
-    .concat(pens.map((p) => [p, p]))
-    .concat([['satildi_hepsi', 'Satılanlar']]);
+  return { list, activeAnimals };
+}
 
-  const gains = activeAnimals.map(dailyGainFor).filter((g) => g !== null);
-  const avgGain = gains.length ? gains.reduce((s, g) => s + g, 0) / gains.length : null;
-
-  const cardsHtml = list.length
-    ? list
-        .map((a) => {
-          const w = latestWeightFor(a.id);
-          const weightVal = w ? w.weight : a.entry_weight;
-          const gain = dailyGainFor(a);
-          const avatar = a.photo_uri
-            ? `<img src="${a.photo_uri}" alt="" onclick="event.stopPropagation(); openPhotoLightbox('${a.photo_uri}')">`
-            : cowIconSvg(42);
-          const genderBadge = a.gender
-            ? `<span class="badge badge-${a.gender === 'erkek' ? 'erkek' : 'disi'}">${a.gender === 'erkek' ? 'Erkek' : 'Dişi'}</span>`
-            : '';
-          return `
+function animalCardHtml(a, attention) {
+  const w = latestWeightFor(a.id);
+  const weightVal = w ? w.weight : a.entry_weight;
+  const gain = dailyGainFor(a);
+  const avatar = a.photo_uri
+    ? `<img src="${a.photo_uri}" alt="" onclick="event.stopPropagation(); openPhotoLightbox('${a.photo_uri}')">`
+    : cowIconSvg(42);
+  const genderBadge = a.gender
+    ? `<span class="badge badge-${a.gender === 'erkek' ? 'erkek' : 'disi'}">${a.gender === 'erkek' ? 'Erkek' : 'Dişi'}</span>`
+    : '';
+  return `
         <div class="animal-card" onclick="openAnimal(${a.id})">
           <div class="top">
             <div class="avatar">${avatar}</div>
@@ -434,9 +424,33 @@ function renderAnimalsList(root) {
             ${attention.has(a.id) ? '<span class="alert-dot"></span>' : ''}
           </div>
         </div>`;
-        })
-        .join('')
-    : `<div class="empty-state">
+}
+
+function animalsResultsHtml(list, emptyHtml) {
+  const attention = animalIdsNeedingAttention(14);
+  const cardsHtml = list.length ? list.map((a) => animalCardHtml(a, attention)).join('') : emptyHtml;
+  return `
+    ${cardsHtml}
+    <div class="info-banner" style="margin-top:8px;">
+      <div class="icon">⬇</div>
+      <div>Bu liste telefonunda duruyor, internetsiz de açılır. <a href="#" onclick="goMore('settings'); return false;" style="font-weight:800;color:inherit;">Yedeğini al</a></div>
+    </div>
+  `;
+}
+
+function renderAnimalsList(root) {
+  setTitle('Hayvanlarım');
+
+  const { list, activeAnimals } = filteredAnimalsForList();
+  const pens = distinctPens();
+  const filters = [['hepsi', 'Hepsi']]
+    .concat(pens.map((p) => [p, p]))
+    .concat([['satildi_hepsi', 'Satılanlar']]);
+
+  const gains = activeAnimals.map(dailyGainFor).filter((g) => g !== null);
+  const avgGain = gains.length ? gains.reduce((s, g) => s + g, 0) / gains.length : null;
+
+  const emptyHtml = `<div class="empty-state">
         <svg viewBox="0 0 160 160" width="140" height="140"><circle cx="80" cy="80" r="76" fill="#e1eecc"></circle><g fill="none" stroke="#7a8a5e" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"><path d="M26 74 L80 34 L134 74"></path><rect x="36" y="74" width="88" height="56" rx="16"></rect><rect x="66" y="98" width="28" height="32" rx="12"></rect></g><circle cx="52" cy="94" r="7" fill="#7a8a5e"></circle><circle cx="108" cy="94" r="7" fill="#7a8a5e"></circle></svg>
         <strong>Henüz hayvan eklenmemiş</strong>Sağ alttaki + butonuyla ilk hayvanınızı ekleyin.
       </div>`;
@@ -459,22 +473,23 @@ function renderAnimalsList(root) {
       <span>🔍</span>
       <input id="search-input" type="text" placeholder="Küpe no, isim veya ahır ara..." value="${escapeHtml(state.search)}">
     </div>
-    ${cardsHtml}
-    <div class="info-banner" style="margin-top:8px;">
-      <div class="icon">⬇</div>
-      <div>Bu liste telefonunda duruyor, internetsiz de açılır. <a href="#" onclick="goMore('settings'); return false;" style="font-weight:800;color:inherit;">Yedeğini al</a></div>
-    </div>
+    <div id="animals-results">${animalsResultsHtml(list, emptyHtml)}</div>
     <button class="fab" onclick="openAnimalForm()">+</button>
   `;
 
   const input = document.getElementById('search-input');
   input.addEventListener('input', (e) => {
     state.search = e.target.value;
-    renderAnimalsList(root);
-    document.getElementById('search-input').focus();
-    const val = document.getElementById('search-input');
-    val.selectionStart = val.selectionEnd = val.value.length;
+    renderAnimalsResultsOnly();
   });
+}
+
+function renderAnimalsResultsOnly() {
+  const resultsEl = document.getElementById('animals-results');
+  if (!resultsEl) return;
+  const { list } = filteredAnimalsForList();
+  const emptyHtml = `<div class="empty-state"><strong>Sonuç bulunamadı</strong>Farklı bir arama dene.</div>`;
+  resultsEl.innerHTML = animalsResultsHtml(list, emptyHtml);
 }
 
 function setFilter(v) {
@@ -951,36 +966,12 @@ async function submitEditProfile() {
 
 /* ---------------- Pazar Yeri (Marketplace) ---------------- */
 
-async function renderMarket(root) {
-  setTitle('Pazar Yeri');
-  if (!window.firebaseReady) {
-    root.innerHTML = `<div class="empty-state"><strong>İnternet bağlantısı yok</strong>Pazar Yeri için internete bağlanman gerekiyor.</div>`;
-    return;
-  }
-  root.innerHTML = `<div class="empty-state">Yükleniyor...</div>`;
-  try {
-    let query = db.collection('listings').orderBy('createdAt', 'desc').limit(100);
-    const snap = await query.get();
-    let listings = snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
-    if (state.marketMineOnly && currentUser) {
-      listings = listings.filter((l) => l.sellerId === currentUser.uid);
-    }
-    if (state.marketSearch.trim()) {
-      const q = state.marketSearch.trim().toLowerCase();
-      listings = listings.filter(
-        (l) =>
-          (l.title || '').toLowerCase().includes(q) ||
-          (l.city || '').toLowerCase().includes(q) ||
-          (l.breed || '').toLowerCase().includes(q)
-      );
-    }
+let cachedListings = [];
 
-    const cardsHtml = listings.length
-      ? listings
-          .map((l) => {
-            const mine = currentUser && l.sellerId === currentUser.uid;
-            const meta = [l.city, l.weight ? formatWeight(l.weight) : null, l.age].filter(Boolean).map(escapeHtml).join(' · ');
-            return `
+function marketCardHtml(l) {
+  const mine = currentUser && l.sellerId === currentUser.uid;
+  const meta = [l.city, l.weight ? formatWeight(l.weight) : null, l.age].filter(Boolean).map(escapeHtml).join(' · ');
+  return `
         <div class="card" style="padding:0;overflow:hidden;cursor:pointer;" onclick="openListing('${l.id}')">
           <div class="photo-header" style="border-radius:0;height:150px;position:relative;">
             ${l.photoUrl ? `<img src="${l.photoUrl}">` : cowIconSvg(52)}
@@ -1002,12 +993,59 @@ async function renderMarket(root) {
             }
           </div>
         </div>`;
-          })
-          .join('')
-      : `<div class="empty-state">
+}
+
+function filteredListings() {
+  let listings = cachedListings.slice();
+  if (state.marketMineOnly && currentUser) {
+    listings = listings.filter((l) => l.sellerId === currentUser.uid);
+  }
+  if (state.marketSearch.trim()) {
+    const q = state.marketSearch.trim().toLowerCase();
+    listings = listings.filter(
+      (l) =>
+        (l.title || '').toLowerCase().includes(q) ||
+        (l.city || '').toLowerCase().includes(q) ||
+        (l.breed || '').toLowerCase().includes(q)
+    );
+  }
+  return listings;
+}
+
+function marketResultsHtml(listings) {
+  if (!listings.length) {
+    return `<div class="empty-state">
           <svg viewBox="0 0 160 160" width="140" height="140"><circle cx="80" cy="80" r="76" fill="#e1eecc"></circle><g fill="none" stroke="#7a8a5e" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"><rect x="30" y="52" width="100" height="60" rx="18"></rect><path d="M52 112 L44 132"></path><path d="M108 112 L116 132"></path><path d="M30 74 H130"></path></g><circle cx="60" cy="63" r="5" fill="#7a8a5e"></circle><circle cx="100" cy="94" r="12" fill="none" stroke="#c67139" stroke-width="6"></circle></svg>
           <strong>${state.marketMineOnly ? 'Henüz ilanın yok' : 'Henüz ilan yok'}</strong>${state.marketMineOnly ? '' : 'İlk ilanı sen ver!'}
         </div>`;
+  }
+  return listings.map(marketCardHtml).join('');
+}
+
+function renderMarketResultsOnly() {
+  const resultsEl = document.getElementById('market-results');
+  if (!resultsEl) return;
+  resultsEl.innerHTML = marketResultsHtml(filteredListings());
+}
+
+function setMarketMineOnly(value, chipEl) {
+  state.marketMineOnly = value;
+  const row = document.getElementById('market-filter-chips');
+  if (row) row.querySelectorAll('.chip').forEach((c) => c.classList.remove('active'));
+  if (chipEl) chipEl.classList.add('active');
+  renderMarketResultsOnly();
+}
+
+async function renderMarket(root) {
+  setTitle('Pazar Yeri');
+  if (!window.firebaseReady) {
+    root.innerHTML = `<div class="empty-state"><strong>İnternet bağlantısı yok</strong>Pazar Yeri için internete bağlanman gerekiyor.</div>`;
+    return;
+  }
+  root.innerHTML = `<div class="empty-state">Yükleniyor...</div>`;
+  try {
+    const snap = await db.collection('listings').orderBy('createdAt', 'desc').limit(100).get();
+    cachedListings = snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
 
     root.innerHTML = `
       ${moderationBannerHtml()}
@@ -1015,17 +1053,17 @@ async function renderMarket(root) {
         <span>🔍</span>
         <input id="market-search-input" type="text" placeholder="Hayvan, şehir veya ırk ara..." value="${escapeHtml(state.marketSearch)}">
       </div>
-      <div class="chip-row">
-        <div class="chip ${!state.marketMineOnly ? 'active' : ''}" onclick="state.marketMineOnly=false; render();">Tümü</div>
-        <div class="chip ${state.marketMineOnly ? 'active' : ''}" onclick="state.marketMineOnly=true; render();">Benim ilanlarım</div>
+      <div class="chip-row" id="market-filter-chips">
+        <div class="chip ${!state.marketMineOnly ? 'active' : ''}" onclick="setMarketMineOnly(false, this)">Tümü</div>
+        <div class="chip ${state.marketMineOnly ? 'active' : ''}" onclick="setMarketMineOnly(true, this)">Benim ilanlarım</div>
       </div>
-      ${cardsHtml}
+      <div id="market-results">${marketResultsHtml(filteredListings())}</div>
       <button class="fab" onclick="openListingForm()">+</button>
     `;
     const input = document.getElementById('market-search-input');
     input.addEventListener('input', (e) => {
       state.marketSearch = e.target.value;
-      renderMarket(root);
+      renderMarketResultsOnly();
     });
   } catch (e) {
     root.innerHTML = `<div class="empty-state"><strong>Yüklenemedi</strong>${escapeHtml(e.message)}</div>`;
