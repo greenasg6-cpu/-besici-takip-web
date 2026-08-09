@@ -968,7 +968,7 @@ function authInputHtml(id, label, type, placeholder, icon, value, extraAttrs) {
   return `
     <div style="margin-top:14px;">
       <div style="font-size:14px;font-weight:800;margin-bottom:8px;">${label}</div>
-      <div style="height:58px;border-radius:999px;border:1.5px solid var(--border);background:var(--card);display:flex;align-items:center;gap:11px;padding:0 20px;">
+      <div style="height:60px;border-radius:999px;border:1.5px solid var(--border);background:var(--card);display:flex;align-items:center;gap:13px;padding:0 24px;">
         ${authFieldIconHtml(AUTH_ICONS[icon])}
         <input type="${type}" id="${id}" placeholder="${escapeHtml(placeholder)}" value="${escapeHtml(value || '')}" ${extraAttrs || ''} style="border:none;background:transparent;flex:1;height:100%;padding:0;font-size:16.5px;font-weight:600;min-width:0;">
         ${
@@ -984,7 +984,7 @@ function authCityInputHtml(id, label, value) {
   return `
     <div style="margin-top:14px;position:relative;">
       <div style="font-size:14px;font-weight:800;margin-bottom:8px;">${label}</div>
-      <div style="height:58px;border-radius:999px;border:1.5px solid var(--border);background:var(--card);display:flex;align-items:center;gap:11px;padding:0 20px;">
+      <div style="height:60px;border-radius:999px;border:1.5px solid var(--border);background:var(--card);display:flex;align-items:center;gap:13px;padding:0 24px;">
         ${authFieldIconHtml(AUTH_ICONS.pin)}
         <input type="text" id="${id}" autocomplete="off" placeholder="Şehir yaz" value="${escapeHtml(value || '')}"
           oninput="filterCitySuggestions('${id}')" onfocus="filterCitySuggestions('${id}')" onblur="setTimeout(()=>hideCitySuggestions('${id}'),150)"
@@ -1031,7 +1031,7 @@ function authPhoneRowHtml(codeId, numId, label, value, codeValue) {
   return `
     <div style="margin-top:14px;">
       <div style="font-size:14px;font-weight:800;margin-bottom:8px;">${label}</div>
-      <div style="height:58px;border-radius:999px;border:1.5px solid var(--border);background:var(--card);display:flex;align-items:center;gap:8px;padding:0 14px 0 20px;">
+      <div style="height:60px;border-radius:999px;border:1.5px solid var(--border);background:var(--card);display:flex;align-items:center;gap:10px;padding:0 16px 0 24px;">
         ${authFieldIconHtml(AUTH_ICONS.phone)}
         <select id="${codeId}" style="border:none;background:transparent;flex:none;width:74px;height:100%;padding:0 4px 0 0;font-size:16.5px;font-weight:700;">
           ${COUNTRY_CODES.map((c) => `<option value="${c.code}" ${c.code === (codeValue || '+90') ? 'selected' : ''}>${c.code}</option>`).join('')}
