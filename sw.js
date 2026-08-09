@@ -1,12 +1,11 @@
-const CACHE_NAME = 'besicitakip-v3';
-const APP_SHELL = ['./', './index.html', './style.css', './app.js', './manifest.webmanifest'];
-const STATIC_ASSETS = ['./icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];
+const CACHE_NAME = 'besicitakip-v4';
+const STATIC_ASSETS = ['./manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches
       .open(CACHE_NAME)
-      .then((cache) => cache.addAll(APP_SHELL.concat(STATIC_ASSETS)))
+      .then((cache) => cache.addAll(STATIC_ASSETS))
       .then(() => self.skipWaiting())
   );
 });
@@ -20,17 +19,19 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-function isAppShellRequest(url) {
-  return APP_SHELL.some((path) => url.endsWith(path.replace('./', '/')) || url.endsWith(path));
+function isNetworkFirst(request, pathname) {
+  if (request.mode === 'navigate') return true;
+  return /\.(js|css|html|webmanifest)$/.test(pathname);
 }
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
-  const url = event.request.url;
+  const pathname = new URL(event.request.url).pathname;
 
-  // App shell (HTML/JS/CSS): network-first so users always get the latest
-  // version when online, falling back to cache when offline.
-  if (isAppShellRequest(url) || event.request.mode === 'navigate') {
+  // App shell (HTML/JS/CSS, including Firebase SDK scripts): network-first,
+  // bypassing the HTTP cache too, so users always get the latest version
+  // when online. Falls back to the runtime cache when offline.
+  if (isNetworkFirst(event.request, pathname)) {
     event.respondWith(
       fetch(event.request, { cache: 'no-store' })
         .then((response) => {
@@ -45,7 +46,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Everything else (icons, Firebase CDN scripts, etc.): cache-first.
+  // Everything else (icons, fonts, etc.): cache-first.
   event.respondWith(
     caches.match(event.request).then((cached) => {
       if (cached) return cached;
