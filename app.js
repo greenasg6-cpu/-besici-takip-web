@@ -817,6 +817,7 @@ function renderAccount(root) {
         <div style="font-size:15px;font-weight:600;color:var(--text-soft);line-height:1.5;margin-top:10px;">
           <strong>${escapeHtml(currentUser.email || '')}</strong> adresine bir doğrulama bağlantısı gönderdik. Pazar Yeri ve Topluluk'u kullanabilmek için önce e-postanı doğrulaman gerekiyor.
         </div>
+        <div style="font-size:13.5px;font-weight:600;color:var(--faint);line-height:1.5;margin-top:10px;">E-postayı göremiyorsan spam / gereksiz klasörünü kontrol et.</div>
         <button class="btn btn-primary" style="margin-top:24px;height:58px;width:100%;" onclick="checkEmailVerified()">Doğruladım, devam et</button>
         <button class="btn btn-secondary" style="margin-top:12px;height:58px;width:100%;" onclick="resendVerificationEmail()">Doğrulama bağlantısını tekrar gönder</button>
         <div style="margin-top:20px;font-size:15px;font-weight:700;color:var(--primary-active);cursor:pointer;text-decoration:underline;" onclick="logout()">Çıkış yap</div>
