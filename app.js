@@ -800,6 +800,7 @@ function renderAccount(root) {
         <div class="avatar-initials" style="width:66px;height:66px;background:var(--primary);color:var(--bg);font-size:24px;">${escapeHtml(initials)}</div>
         <div style="flex:1;min-width:0;">
           <div style="font-family:var(--font-heading);font-size:22px;line-height:1.1;">${escapeHtml(p.displayName || currentUser.email)}</div>
+          ${p.username ? `<div style="font-size:13.5px;font-weight:700;color:var(--primary-active);margin-top:2px;">@${escapeHtml(p.username)}</div>` : ''}
           <div style="font-size:14px;font-weight:600;color:var(--muted);margin-top:4px;">${escapeHtml(p.city || '')}${p.city && maskedPhone ? ' · ' : ''}${escapeHtml(maskedPhone)}</div>
         </div>
         ${isAdminUser ? '<div class="badge badge-aktif">Yönetici</div>' : ''}
@@ -885,6 +886,7 @@ const AUTH_ICONS = {
   person: '<circle cx="12" cy="8" r="4"></circle><path d="M4 20c1.5-4 5-6 8-6s6.5 2 8 6"></path>',
   phone: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1.1 1A16 16 0 0 1 4 5.1 1 1 0 0 1 5 4z"></path>',
   pin: '<path d="M12 21s7-6.5 7-12a7 7 0 1 0-14 0c0 5.5 7 12 7 12z"></path><circle cx="12" cy="9" r="2.5"></circle>',
+  at: '<circle cx="12" cy="12" r="4"></circle><path d="M16 12v1.5a2.5 2.5 0 0 0 5 0V12a9 9 0 1 0-4 7.5"></path>',
 };
 
 function authInputHtml(id, label, type, placeholder, icon, value) {
@@ -925,7 +927,8 @@ function loginFormHtml() {
 
 function registerFormHtml() {
   return `
-    ${authInputHtml('rf-name', 'Ad Soyad / Kullanıcı Adı *', 'text', 'Ör. Mehmet Yılmaz', 'person')}
+    ${authInputHtml('rf-name', 'Ad Soyad *', 'text', 'Ör. Mehmet Yılmaz', 'person')}
+    ${authInputHtml('rf-username', 'Kullanıcı Adı', 'text', 'Ör. mehmety34', 'at')}
     ${authInputHtml('rf-phone', 'Telefon', 'text', '05xx xxx xx xx', 'phone')}
     ${authInputHtml('rf-city', 'Şehir', 'text', 'Ör. Şanlıurfa', 'pin')}
     ${authInputHtml('rf-email', 'E-posta *', 'text', 'ornek@eposta.com', 'mail')}
@@ -990,12 +993,13 @@ async function resetPassword() {
 
 async function submitRegister() {
   const name = document.getElementById('rf-name').value.trim();
+  const username = document.getElementById('rf-username').value.trim().replace(/^@/, '');
   const phone = document.getElementById('rf-phone').value.trim();
   const city = document.getElementById('rf-city').value.trim();
   const email = document.getElementById('rf-email').value.trim();
   const password = document.getElementById('rf-password').value;
   if (!name || !email || !password) {
-    authError = 'Ad, e-posta ve şifre zorunludur.';
+    authError = 'Ad soyad, e-posta ve şifre zorunludur.';
     render();
     return;
   }
@@ -1007,6 +1011,7 @@ async function submitRegister() {
     currentUser = cred.user;
     await db.collection('users').doc(cred.user.uid).set({
       displayName: name,
+      username: username || null,
       email,
       phone: phone || null,
       city: city || null,
@@ -1048,7 +1053,8 @@ function moderationBannerHtml() {
 function openEditProfileForm() {
   const p = currentUserProfile || {};
   const body = `
-    <label class="field"><span class="field-label">Ad Soyad / Kullanıcı Adı</span><input type="text" id="ep-name" value="${escapeHtml(p.displayName || '')}"></label>
+    <label class="field"><span class="field-label">Ad Soyad</span><input type="text" id="ep-name" value="${escapeHtml(p.displayName || '')}"></label>
+    <label class="field"><span class="field-label">Kullanıcı Adı</span><input type="text" id="ep-username" value="${escapeHtml(p.username || '')}" placeholder="Ör. mehmety34"></label>
     <label class="field"><span class="field-label">Telefon</span><input type="text" id="ep-phone" value="${escapeHtml(p.phone || '')}"></label>
     <label class="field"><span class="field-label">Şehir</span><input type="text" id="ep-city" value="${escapeHtml(p.city || '')}"></label>
     <button class="btn btn-primary" onclick="submitEditProfile()">Kaydet</button>
@@ -1058,12 +1064,13 @@ function openEditProfileForm() {
 
 async function submitEditProfile() {
   const name = document.getElementById('ep-name').value.trim();
+  const username = document.getElementById('ep-username').value.trim().replace(/^@/, '');
   const phone = document.getElementById('ep-phone').value.trim();
   const city = document.getElementById('ep-city').value.trim();
-  if (!name) return alert('Ad zorunludur.');
+  if (!name) return alert('Ad soyad zorunludur.');
   try {
     await db.collection('users').doc(currentUser.uid).set(
-      { displayName: name, phone: phone || null, city: city || null },
+      { displayName: name, username: username || null, phone: phone || null, city: city || null },
       { merge: true }
     );
     await refreshCurrentUserProfile();
