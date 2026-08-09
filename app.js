@@ -980,18 +980,51 @@ function authInputHtml(id, label, type, placeholder, icon, value, extraAttrs) {
     </div>`;
 }
 
-function authSelectHtml(id, label, icon, options, value, placeholder) {
+function authCityInputHtml(id, label, value) {
   return `
-    <div style="margin-top:14px;">
+    <div style="margin-top:14px;position:relative;">
       <div style="font-size:14px;font-weight:800;margin-bottom:8px;">${label}</div>
       <div style="height:58px;border-radius:999px;border:1.5px solid var(--border);background:var(--card);display:flex;align-items:center;gap:11px;padding:0 20px;">
-        ${authFieldIconHtml(AUTH_ICONS[icon])}
-        <select id="${id}" style="border:none;background:transparent;flex:1;height:100%;padding:0;font-size:16.5px;font-weight:600;min-width:0;">
-          <option value="">${escapeHtml(placeholder || 'Seç')}</option>
-          ${options.map((o) => `<option value="${escapeHtml(o)}" ${o === value ? 'selected' : ''}>${escapeHtml(o)}</option>`).join('')}
-        </select>
+        ${authFieldIconHtml(AUTH_ICONS.pin)}
+        <input type="text" id="${id}" autocomplete="off" placeholder="Şehir yaz" value="${escapeHtml(value || '')}"
+          oninput="filterCitySuggestions('${id}')" onfocus="filterCitySuggestions('${id}')" onblur="setTimeout(()=>hideCitySuggestions('${id}'),150)"
+          style="border:none;background:transparent;flex:1;height:100%;padding:0;font-size:16.5px;font-weight:600;min-width:0;">
       </div>
+      <div id="${id}-list" class="city-suggest-list" style="display:none;"></div>
     </div>`;
+}
+
+function citySuggestListHtml(id, filter) {
+  const q = (filter || '').trim().toLocaleLowerCase('tr');
+  const matches = (q ? TURKISH_CITIES.filter((c) => c.toLocaleLowerCase('tr').includes(q)) : TURKISH_CITIES).slice(0, 30);
+  if (!matches.length) return '<div class="city-suggest-empty">Şehir bulunamadı</div>';
+  return matches.map((c) => `<div class="city-suggest-item" onmousedown="selectCitySuggestion('${id}','${c}')">${escapeHtml(c)}</div>`).join('');
+}
+
+function filterCitySuggestions(id) {
+  const input = document.getElementById(id);
+  const list = document.getElementById(id + '-list');
+  if (!input || !list) return;
+  list.innerHTML = citySuggestListHtml(id, input.value);
+  list.style.display = 'block';
+}
+
+function hideCitySuggestions(id) {
+  const list = document.getElementById(id + '-list');
+  if (list) list.style.display = 'none';
+}
+
+function selectCitySuggestion(id, city) {
+  const input = document.getElementById(id);
+  if (input) input.value = city;
+  hideCitySuggestions(id);
+}
+
+function normalizeCityInput(value) {
+  const v = (value || '').trim();
+  if (!v) return '';
+  const match = TURKISH_CITIES.find((c) => c.toLocaleLowerCase('tr') === v.toLocaleLowerCase('tr'));
+  return match || v;
 }
 
 function authPhoneRowHtml(codeId, numId, label, value, codeValue) {
@@ -1000,7 +1033,7 @@ function authPhoneRowHtml(codeId, numId, label, value, codeValue) {
       <div style="font-size:14px;font-weight:800;margin-bottom:8px;">${label}</div>
       <div style="height:58px;border-radius:999px;border:1.5px solid var(--border);background:var(--card);display:flex;align-items:center;gap:8px;padding:0 14px 0 20px;">
         ${authFieldIconHtml(AUTH_ICONS.phone)}
-        <select id="${codeId}" style="border:none;background:transparent;flex:none;height:100%;padding:0 4px 0 0;font-size:16.5px;font-weight:700;">
+        <select id="${codeId}" style="border:none;background:transparent;flex:none;width:74px;height:100%;padding:0 4px 0 0;font-size:16.5px;font-weight:700;">
           ${COUNTRY_CODES.map((c) => `<option value="${c.code}" ${c.code === (codeValue || '+90') ? 'selected' : ''}>${c.code}</option>`).join('')}
         </select>
         <div style="width:1px;height:26px;background:var(--border);flex:none;"></div>
@@ -1042,7 +1075,7 @@ function registerFormHtml() {
     ${authInputHtml('rf-username', 'Kullanıcı Adı', 'text', 'Ör. mehmety34', 'at', '', `oninput="this.value=this.value.replace(/[^a-zA-Z0-9_]/g,'').toLowerCase()"`)}
     <div style="font-size:12.5px;font-weight:600;color:var(--text-soft);margin-top:6px;padding:0 6px;">Sadece İngilizce harf, rakam ve alt çizgi (_) kullanılabilir.</div>
     ${authPhoneRowHtml('rf-phone-code', 'rf-phone', 'Telefon', '', '+90')}
-    ${authSelectHtml('rf-city', 'Şehir', 'pin', TURKISH_CITIES, '', 'Şehir seç')}
+    ${authCityInputHtml('rf-city', 'Şehir', '')}
     ${authInputHtml('rf-email', 'E-posta *', 'text', 'ornek@gmail.com', 'mail')}
     ${authInputHtml('rf-password', 'Şifre *', 'password', 'En az 6 karakter', 'lock')}
     <div style="font-size:12.5px;font-weight:600;color:var(--text-soft);margin-top:6px;padding:0 6px;">Şifre en az bir büyük harf, bir küçük harf ve bir rakam içermeli.</div>
@@ -1111,7 +1144,7 @@ async function submitRegister() {
   const phoneCode = document.getElementById('rf-phone-code').value;
   const phoneNum = document.getElementById('rf-phone').value.trim();
   const phone = phoneNum ? `${phoneCode} ${phoneNum}` : '';
-  const city = document.getElementById('rf-city').value;
+  const city = normalizeCityInput(document.getElementById('rf-city').value);
   const email = document.getElementById('rf-email').value.trim();
   const password = document.getElementById('rf-password').value;
 
@@ -1208,11 +1241,10 @@ function openEditProfileForm() {
         <input type="tel" id="ep-phone" value="${escapeHtml(phoneParts.number)}" style="flex:1;" oninput="this.value=this.value.replace(/[^0-9 ]/g,'')">
       </div>
     </label>
-    <label class="field"><span class="field-label">Şehir</span>
-      <select id="ep-city">
-        <option value="">Şehir seç</option>
-        ${TURKISH_CITIES.map((c) => `<option value="${escapeHtml(c)}" ${c === p.city ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('')}
-      </select>
+    <label class="field" style="position:relative;"><span class="field-label">Şehir</span>
+      <input type="text" id="ep-city" autocomplete="off" placeholder="Şehir yaz" value="${escapeHtml(p.city || '')}"
+        oninput="filterCitySuggestions('ep-city')" onfocus="filterCitySuggestions('ep-city')" onblur="setTimeout(()=>hideCitySuggestions('ep-city'),150)">
+      <div id="ep-city-list" class="city-suggest-list" style="display:none;"></div>
     </label>
     <button class="btn btn-primary" onclick="submitEditProfile()">Kaydet</button>
   `;
@@ -1225,7 +1257,7 @@ async function submitEditProfile() {
   const phoneCode = document.getElementById('ep-phone-code').value;
   const phoneNum = document.getElementById('ep-phone').value.trim();
   const phone = phoneNum ? `${phoneCode} ${phoneNum}` : '';
-  const city = document.getElementById('ep-city').value;
+  const city = normalizeCityInput(document.getElementById('ep-city').value);
   if (!name) return alert('Ad soyad zorunludur.');
   if (username && !/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
     return alert('Kullanıcı adı sadece İngilizce harf, rakam ve alt çizgi içerebilir (en az 3 karakter).');
