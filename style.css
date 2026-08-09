@@ -226,6 +226,7 @@ button.btn {
   cursor: pointer;
   text-align: center;
 }
+button.btn:disabled { opacity: 0.7; cursor: not-allowed; }
 .btn-primary { background: var(--primary); color: var(--bg); box-shadow: var(--shadow-md); }
 .btn-primary:active { background: var(--primary-active); }
 .btn-secondary { background: var(--sage); color: var(--bg); }
@@ -470,6 +471,16 @@ nav.tabbar button.active .tab-icon { background: var(--primary); }
   box-shadow: var(--shadow-md);
 }
 .toast.show { opacity: 1; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner {
+  display: inline-block;
+  width: 20px; height: 20px;
+  border-radius: 999px;
+  border: 3px solid rgba(245, 234, 216, 0.35);
+  border-top-color: var(--bg);
+  animation: spin 0.8s linear infinite;
+}
 
 /* — avatar with initials (community / account) — */
 .avatar-initials {

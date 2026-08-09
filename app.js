@@ -738,6 +738,8 @@ function blobToBase64(blob) {
 
 let isAdminUser = false;
 let accountFormMode = 'login';
+let authError = null;
+let authBusy = false;
 let profileRequestSeq = 0;
 
 async function refreshCurrentUserProfile() {
@@ -830,48 +832,111 @@ function renderAccount(root) {
     return;
   }
 
+  const isLogin = accountFormMode === 'login';
   root.innerHTML = `
-    <div class="chip-row">
-      <div class="chip ${accountFormMode === 'login' ? 'active' : ''}" onclick="accountFormMode='login'; render();">Giriş Yap</div>
-      <div class="chip ${accountFormMode === 'register' ? 'active' : ''}" onclick="accountFormMode='register'; render();">Kayıt Ol</div>
-    </div>
-    <div class="card">
-      ${accountFormMode === 'login' ? loginFormHtml() : registerFormHtml()}
+    <div style="padding-top:6px;">
+      <div style="width:64px;height:64px;">${authIconSvg(64)}</div>
+      <div style="font-family:var(--font-heading);font-size:32px;line-height:1.08;letter-spacing:-.02em;margin-top:16px;">${isLogin ? 'Tekrar hoş geldin' : 'Aramıza katıl'}</div>
+      <div style="font-size:15px;font-weight:600;color:var(--text-soft);line-height:1.5;margin-top:8px;">Pazar Yeri ve Topluluk için ${isLogin ? 'giriş yap' : 'kayıt ol'}. Hayvan kayıtların telefonunda zaten duruyor.</div>
+
+      <div class="seg-row" style="margin-top:20px;">
+        <div class="seg-opt ${isLogin ? 'active' : ''}" onclick="accountFormMode='login'; authError=null; render();">Giriş yap</div>
+        <div class="seg-opt ${!isLogin ? 'active' : ''}" onclick="accountFormMode='register'; authError=null; render();">Kayıt ol</div>
+      </div>
+
+      ${isLogin ? loginFormHtml() : registerFormHtml()}
+
+      ${
+        authError
+          ? `<div style="margin-top:14px;padding:14px 16px;border-radius:24px;background:var(--primary-light);border:1.5px solid var(--red);display:flex;gap:10px;align-items:center;">
+              <div style="width:26px;height:26px;border-radius:999px;background:var(--red);color:var(--primary-light);display:flex;align-items:center;justify-content:center;font-weight:900;font-size:16px;flex:none;">!</div>
+              <div style="font-size:14.5px;font-weight:700;color:var(--red-deep);line-height:1.4;">${escapeHtml(authError)}</div>
+            </div>`
+          : ''
+      }
+
+      <button class="btn btn-primary" style="margin-top:20px;height:64px;font-size:20px;display:flex;align-items:center;justify-content:center;gap:10px;" onclick="${isLogin ? 'submitLogin()' : 'submitRegister()'}" ${authBusy ? 'disabled' : ''}>
+        ${authBusy ? '<span class="spinner"></span>' : ''}<span>${isLogin ? 'Giriş yap' : 'Kayıt ol'}</span>
+      </button>
+
+      ${isLogin ? `<div style="margin-top:16px;text-align:center;font-size:15px;font-weight:700;color:var(--primary-active);cursor:pointer;text-decoration:underline;" onclick="resetPassword()">Şifremi unuttum</div>` : ''}
+
+      <div class="info-banner" style="margin-top:26px;">
+        <div style="flex:1;">
+          <div>Hayvan kayıtların için hesap gerekmiyor — Pazar Yeri ve Topluluk için gerekiyor.</div>
+          <button class="btn btn-secondary" style="margin-top:14px;" onclick="goTab('animals')">Şimdilik geç, hayvanlarımı takip et</button>
+        </div>
+      </div>
     </div>
   `;
 }
 
+function authIconSvg(size) {
+  return `<svg viewBox="0 0 512 512" width="${size}" height="${size}"><rect width="512" height="512" rx="118" fill="#c67139"></rect><g transform="rotate(-8 256 262)"><circle cx="256" cy="132" r="30" fill="#f5ead8"></circle><rect x="140" y="140" width="232" height="262" rx="76" fill="#f5ead8"></rect><circle cx="256" cy="200" r="27" fill="#c67139"></circle><ellipse cx="190" cy="292" rx="34" ry="21" fill="#7a8a5e"></ellipse><ellipse cx="322" cy="292" rx="34" ry="21" fill="#7a8a5e"></ellipse><circle cx="256" cy="300" r="56" fill="#7a8a5e"></circle><ellipse cx="256" cy="330" rx="32" ry="23" fill="#f5ead8"></ellipse><circle cx="244" cy="329" r="5.5" fill="#7a8a5e"></circle><circle cx="268" cy="329" r="5.5" fill="#7a8a5e"></circle></g></svg>`;
+}
+
+function authFieldIconHtml(path) {
+  return `<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#82796a" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round">${path}</svg>`;
+}
+
+const AUTH_ICONS = {
+  mail: '<path d="M4 6h16v12H4z"></path><path d="M4 6l8 7 8-7"></path>',
+  lock: '<rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path>',
+  person: '<circle cx="12" cy="8" r="4"></circle><path d="M4 20c1.5-4 5-6 8-6s6.5 2 8 6"></path>',
+  phone: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1.1 1A16 16 0 0 1 4 5.1 1 1 0 0 1 5 4z"></path>',
+  pin: '<path d="M12 21s7-6.5 7-12a7 7 0 1 0-14 0c0 5.5 7 12 7 12z"></path><circle cx="12" cy="9" r="2.5"></circle>',
+};
+
+function authInputHtml(id, label, type, placeholder, icon, value) {
+  return `
+    <div style="margin-top:14px;">
+      <div style="font-size:14px;font-weight:800;margin-bottom:8px;">${label}</div>
+      <div style="height:58px;border-radius:999px;border:1.5px solid var(--border);background:var(--card);display:flex;align-items:center;gap:11px;padding:0 20px;">
+        ${authFieldIconHtml(AUTH_ICONS[icon])}
+        <input type="${type}" id="${id}" placeholder="${escapeHtml(placeholder)}" value="${escapeHtml(value || '')}" style="border:none;background:transparent;flex:1;height:100%;padding:0;font-size:16.5px;font-weight:600;">
+      </div>
+    </div>`;
+}
+
 function loginFormHtml() {
   return `
-    <label class="field"><span class="field-label">E-posta</span><input type="text" id="lf-email" placeholder="ornek@eposta.com"></label>
-    <label class="field"><span class="field-label">Şifre</span><input type="password" id="lf-password" placeholder="Şifreniz"></label>
-    <button class="btn btn-primary" onclick="submitLogin()">Giriş Yap</button>
+    ${authInputHtml('lf-email', 'E-posta', 'text', 'ornek@eposta.com', 'mail')}
+    ${authInputHtml('lf-password', 'Şifre', 'password', 'Şifreniz', 'lock')}
   `;
 }
 
 function registerFormHtml() {
   return `
-    <label class="field"><span class="field-label">Ad Soyad / Kullanıcı Adı <span class="required">*</span></span><input type="text" id="rf-name" placeholder="Ör. Mehmet Yılmaz"></label>
-    <label class="field"><span class="field-label">Telefon</span><input type="text" id="rf-phone" placeholder="05xx xxx xx xx"></label>
-    <label class="field"><span class="field-label">Şehir</span><input type="text" id="rf-city" placeholder="Ör. Şanlıurfa"></label>
-    <label class="field"><span class="field-label">E-posta <span class="required">*</span></span><input type="text" id="rf-email" placeholder="ornek@eposta.com"></label>
-    <label class="field"><span class="field-label">Şifre <span class="required">*</span></span><input type="password" id="rf-password" placeholder="En az 6 karakter"></label>
-    <button class="btn btn-primary" onclick="submitRegister()">Kayıt Ol</button>
+    ${authInputHtml('rf-name', 'Ad Soyad / Kullanıcı Adı *', 'text', 'Ör. Mehmet Yılmaz', 'person')}
+    ${authInputHtml('rf-phone', 'Telefon', 'text', '05xx xxx xx xx', 'phone')}
+    ${authInputHtml('rf-city', 'Şehir', 'text', 'Ör. Şanlıurfa', 'pin')}
+    ${authInputHtml('rf-email', 'E-posta *', 'text', 'ornek@eposta.com', 'mail')}
+    ${authInputHtml('rf-password', 'Şifre *', 'password', 'En az 6 karakter', 'lock')}
   `;
 }
 
 async function submitLogin() {
   const email = document.getElementById('lf-email').value.trim();
   const password = document.getElementById('lf-password').value;
-  if (!email || !password) return alert('E-posta ve şifre zorunludur.');
+  if (!email || !password) {
+    authError = 'E-posta ve şifre zorunludur.';
+    render();
+    return;
+  }
+  authBusy = true;
+  authError = null;
+  render();
   try {
     const cred = await auth.signInWithEmailAndPassword(email, password);
     currentUser = cred.user;
     await refreshCurrentUserProfile();
+    authBusy = false;
     toast('Giriş yapıldı');
     render();
   } catch (e) {
-    alert(loginErrorMessage(e));
+    authBusy = false;
+    authError = loginErrorMessage(e);
+    render();
   }
 }
 
@@ -879,12 +944,30 @@ function loginErrorMessage(e) {
   const map = {
     'auth/invalid-email': 'Geçersiz e-posta adresi.',
     'auth/user-not-found': 'Bu e-posta ile kayıtlı kullanıcı bulunamadı.',
-    'auth/wrong-password': 'Şifre hatalı.',
+    'auth/wrong-password': 'Şifre hatalı görünüyor. Tekrar dene ya da sıfırla.',
     'auth/invalid-credential': 'E-posta veya şifre hatalı.',
     'auth/email-already-in-use': 'Bu e-posta zaten kayıtlı.',
     'auth/weak-password': 'Şifre en az 6 karakter olmalı.',
+    'auth/missing-password': 'Şifre girmelisin.',
   };
   return map[e.code] || 'Bir hata oluştu: ' + e.message;
+}
+
+async function resetPassword() {
+  const email = (document.getElementById('lf-email') && document.getElementById('lf-email').value.trim()) || '';
+  if (!email) {
+    authError = 'Şifre sıfırlamak için önce e-posta adresini yaz.';
+    render();
+    return;
+  }
+  try {
+    await auth.sendPasswordResetEmail(email);
+    authError = null;
+    toast('Şifre sıfırlama bağlantısı e-postana gönderildi');
+  } catch (e) {
+    authError = loginErrorMessage(e);
+    render();
+  }
 }
 
 async function submitRegister() {
@@ -893,7 +976,14 @@ async function submitRegister() {
   const city = document.getElementById('rf-city').value.trim();
   const email = document.getElementById('rf-email').value.trim();
   const password = document.getElementById('rf-password').value;
-  if (!name || !email || !password) return alert('Ad, e-posta ve şifre zorunludur.');
+  if (!name || !email || !password) {
+    authError = 'Ad, e-posta ve şifre zorunludur.';
+    render();
+    return;
+  }
+  authBusy = true;
+  authError = null;
+  render();
   try {
     const cred = await auth.createUserWithEmailAndPassword(email, password);
     currentUser = cred.user;
@@ -907,10 +997,13 @@ async function submitRegister() {
       createdAt: firebase.firestore.FieldValue.serverTimestamp(),
     });
     await refreshCurrentUserProfile();
+    authBusy = false;
     toast('Kayıt tamamlandı, hoş geldin!');
     render();
   } catch (e) {
-    alert(loginErrorMessage(e));
+    authBusy = false;
+    authError = loginErrorMessage(e);
+    render();
   }
 }
 
