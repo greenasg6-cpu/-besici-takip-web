@@ -360,11 +360,37 @@ function requireLogin(actionLabel) {
     render();
     return false;
   }
+  if (currentUser.emailVerified === false) {
+    alert(`${actionLabel} için önce e-postanı doğrulamalısın.`);
+    state.tab = 'account';
+    state.detailId = null;
+    render();
+    return false;
+  }
   if (currentUserProfile && currentUserProfile.banned) {
     alert('Hesabınız yönetici tarafından engellenmiş, bu işlemi yapamazsınız.');
     return false;
   }
   return true;
+}
+
+async function checkEmailVerified() {
+  if (!currentUser) return;
+  try {
+    await currentUser.reload();
+  } catch (e) {}
+  toast(currentUser.emailVerified ? 'E-posta doğrulandı, hoş geldin!' : 'Henüz doğrulanmamış görünüyor, e-postanı kontrol et.');
+  render();
+}
+
+async function resendVerificationEmail() {
+  if (!currentUser) return;
+  try {
+    await currentUser.sendEmailVerification();
+    toast('Doğrulama bağlantısı tekrar gönderildi.');
+  } catch (e) {
+    toast(loginErrorMessage(e));
+  }
 }
 
 /* ---------------- Animals list ---------------- */
@@ -783,6 +809,20 @@ function renderAccount(root) {
     root.innerHTML = `<div class="empty-state"><strong>İnternet bağlantısı yok</strong>Hesap özellikleri için internete bağlanman gerekiyor.</div>`;
     return;
   }
+  if (currentUser && currentUser.emailVerified === false) {
+    root.innerHTML = `
+      <div style="padding-top:10px;text-align:center;">
+        <div style="width:64px;height:64px;margin:0 auto;">${authIconSvg(64)}</div>
+        <div style="font-family:var(--font-heading);font-size:26px;line-height:1.15;margin-top:18px;">E-postanı doğrula</div>
+        <div style="font-size:15px;font-weight:600;color:var(--text-soft);line-height:1.5;margin-top:10px;">
+          <strong>${escapeHtml(currentUser.email || '')}</strong> adresine bir doğrulama bağlantısı gönderdik. Pazar Yeri ve Topluluk'u kullanabilmek için önce e-postanı doğrulaman gerekiyor.
+        </div>
+        <button class="btn btn-primary" style="margin-top:24px;height:58px;width:100%;" onclick="checkEmailVerified()">Doğruladım, devam et</button>
+        <button class="btn btn-secondary" style="margin-top:12px;height:58px;width:100%;" onclick="resendVerificationEmail()">Doğrulama bağlantısını tekrar gönder</button>
+        <div style="margin-top:20px;font-size:15px;font-weight:700;color:var(--primary-active);cursor:pointer;text-decoration:underline;" onclick="logout()">Çıkış yap</div>
+      </div>`;
+    return;
+  }
   if (currentUser) {
     const p = currentUserProfile || {};
     const initials = (p.displayName || currentUser.email || '?').trim().slice(0, 2).toUpperCase();
@@ -880,6 +920,39 @@ function authFieldIconHtml(path) {
   return `<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#82796a" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round">${path}</svg>`;
 }
 
+const TURKISH_CITIES = [
+  'Adana', 'Adıyaman', 'Afyonkarahisar', 'Ağrı', 'Amasya', 'Ankara', 'Antalya', 'Artvin', 'Aydın', 'Balıkesir',
+  'Bilecik', 'Bingöl', 'Bitlis', 'Bolu', 'Burdur', 'Bursa', 'Çanakkale', 'Çankırı', 'Çorum', 'Denizli',
+  'Diyarbakır', 'Düzce', 'Edirne', 'Elazığ', 'Erzincan', 'Erzurum', 'Eskişehir', 'Gaziantep', 'Giresun', 'Gümüşhane',
+  'Hakkari', 'Hatay', 'Iğdır', 'Isparta', 'İstanbul', 'İzmir', 'Kahramanmaraş', 'Karabük', 'Karaman', 'Kars',
+  'Kastamonu', 'Kayseri', 'Kırıkkale', 'Kırklareli', 'Kırşehir', 'Kilis', 'Kocaeli', 'Konya', 'Kütahya', 'Malatya',
+  'Manisa', 'Mardin', 'Mersin', 'Muğla', 'Muş', 'Nevşehir', 'Niğde', 'Ordu', 'Osmaniye', 'Rize',
+  'Sakarya', 'Samsun', 'Siirt', 'Sinop', 'Sivas', 'Şanlıurfa', 'Şırnak', 'Tekirdağ', 'Tokat', 'Trabzon',
+  'Tunceli', 'Uşak', 'Van', 'Yalova', 'Yozgat', 'Zonguldak',
+];
+
+const COUNTRY_CODES = [
+  { code: '+90', label: 'Türkiye (+90)' },
+  { code: '+49', label: 'Almanya (+49)' },
+  { code: '+31', label: 'Hollanda (+31)' },
+  { code: '+32', label: 'Belçika (+32)' },
+  { code: '+33', label: 'Fransa (+33)' },
+  { code: '+43', label: 'Avusturya (+43)' },
+  { code: '+41', label: 'İsviçre (+41)' },
+  { code: '+44', label: 'İngiltere (+44)' },
+  { code: '+1', label: 'ABD / Kanada (+1)' },
+  { code: '+7', label: 'Rusya (+7)' },
+  { code: '+994', label: 'Azerbaycan (+994)' },
+  { code: '+971', label: 'BAE (+971)' },
+  { code: '+966', label: 'Suudi Arabistan (+966)' },
+];
+
+const ALLOWED_EMAIL_DOMAINS = [
+  'gmail.com', 'hotmail.com', 'hotmail.com.tr', 'outlook.com', 'outlook.com.tr',
+  'yahoo.com', 'yahoo.com.tr', 'icloud.com', 'live.com', 'yandex.com', 'yandex.com.tr',
+  'mynet.com', 'protonmail.com',
+];
+
 const AUTH_ICONS = {
   mail: '<path d="M4 6h16v12H4z"></path><path d="M4 6l8 7 8-7"></path>',
   lock: '<rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path>',
@@ -889,14 +962,14 @@ const AUTH_ICONS = {
   at: '<circle cx="12" cy="12" r="4"></circle><path d="M16 12v1.5a2.5 2.5 0 0 0 5 0V12a9 9 0 1 0-4 7.5"></path>',
 };
 
-function authInputHtml(id, label, type, placeholder, icon, value) {
+function authInputHtml(id, label, type, placeholder, icon, value, extraAttrs) {
   const isPassword = type === 'password';
   return `
     <div style="margin-top:14px;">
       <div style="font-size:14px;font-weight:800;margin-bottom:8px;">${label}</div>
       <div style="height:58px;border-radius:999px;border:1.5px solid var(--border);background:var(--card);display:flex;align-items:center;gap:11px;padding:0 20px;">
         ${authFieldIconHtml(AUTH_ICONS[icon])}
-        <input type="${type}" id="${id}" placeholder="${escapeHtml(placeholder)}" value="${escapeHtml(value || '')}" style="border:none;background:transparent;flex:1;height:100%;padding:0;font-size:16.5px;font-weight:600;min-width:0;">
+        <input type="${type}" id="${id}" placeholder="${escapeHtml(placeholder)}" value="${escapeHtml(value || '')}" ${extraAttrs || ''} style="border:none;background:transparent;flex:1;height:100%;padding:0;font-size:16.5px;font-weight:600;min-width:0;">
         ${
           isPassword
             ? `<button type="button" onclick="togglePasswordVisibility('${id}', this)" style="background:none;border:none;padding:4px;margin:0;flex:none;cursor:pointer;display:flex;align-items:center;" aria-label="Şifreyi göster">${authFieldIconHtml('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"></path><circle cx="12" cy="12" r="3"></circle>')}</button>`
@@ -904,6 +977,43 @@ function authInputHtml(id, label, type, placeholder, icon, value) {
         }
       </div>
     </div>`;
+}
+
+function authSelectHtml(id, label, icon, options, value, placeholder) {
+  return `
+    <div style="margin-top:14px;">
+      <div style="font-size:14px;font-weight:800;margin-bottom:8px;">${label}</div>
+      <div style="height:58px;border-radius:999px;border:1.5px solid var(--border);background:var(--card);display:flex;align-items:center;gap:11px;padding:0 20px;">
+        ${authFieldIconHtml(AUTH_ICONS[icon])}
+        <select id="${id}" style="border:none;background:transparent;flex:1;height:100%;padding:0;font-size:16.5px;font-weight:600;min-width:0;">
+          <option value="">${escapeHtml(placeholder || 'Seç')}</option>
+          ${options.map((o) => `<option value="${escapeHtml(o)}" ${o === value ? 'selected' : ''}>${escapeHtml(o)}</option>`).join('')}
+        </select>
+      </div>
+    </div>`;
+}
+
+function authPhoneRowHtml(codeId, numId, label, value, codeValue) {
+  return `
+    <div style="margin-top:14px;">
+      <div style="font-size:14px;font-weight:800;margin-bottom:8px;">${label}</div>
+      <div style="height:58px;border-radius:999px;border:1.5px solid var(--border);background:var(--card);display:flex;align-items:center;gap:8px;padding:0 14px 0 20px;">
+        ${authFieldIconHtml(AUTH_ICONS.phone)}
+        <select id="${codeId}" style="border:none;background:transparent;flex:none;height:100%;padding:0 4px 0 0;font-size:16.5px;font-weight:700;">
+          ${COUNTRY_CODES.map((c) => `<option value="${c.code}" ${c.code === (codeValue || '+90') ? 'selected' : ''}>${c.code}</option>`).join('')}
+        </select>
+        <div style="width:1px;height:26px;background:var(--border);flex:none;"></div>
+        <input type="tel" id="${numId}" placeholder="5xx xxx xx xx" value="${escapeHtml(value || '')}" oninput="this.value=this.value.replace(/[^0-9 ]/g,'')" style="border:none;background:transparent;flex:1;height:100%;padding:0 0 0 8px;font-size:16.5px;font-weight:600;min-width:0;">
+      </div>
+    </div>`;
+}
+
+function splitPhone(phone) {
+  if (!phone) return { code: '+90', number: '' };
+  const codes = COUNTRY_CODES.map((c) => c.code).sort((a, b) => b.length - a.length);
+  const match = codes.find((code) => phone.startsWith(code));
+  if (match) return { code: match, number: phone.slice(match.length).trim() };
+  return { code: '+90', number: phone };
 }
 
 function togglePasswordVisibility(id, btn) {
@@ -928,11 +1038,13 @@ function loginFormHtml() {
 function registerFormHtml() {
   return `
     ${authInputHtml('rf-name', 'Ad Soyad *', 'text', 'Ör. Mehmet Yılmaz', 'person')}
-    ${authInputHtml('rf-username', 'Kullanıcı Adı', 'text', 'Ör. mehmety34', 'at')}
-    ${authInputHtml('rf-phone', 'Telefon', 'text', '05xx xxx xx xx', 'phone')}
-    ${authInputHtml('rf-city', 'Şehir', 'text', 'Ör. Şanlıurfa', 'pin')}
-    ${authInputHtml('rf-email', 'E-posta *', 'text', 'ornek@eposta.com', 'mail')}
+    ${authInputHtml('rf-username', 'Kullanıcı Adı', 'text', 'Ör. mehmety34', 'at', '', `oninput="this.value=this.value.replace(/[^a-zA-Z0-9_]/g,'').toLowerCase()"`)}
+    <div style="font-size:12.5px;font-weight:600;color:var(--text-soft);margin-top:6px;padding:0 6px;">Sadece İngilizce harf, rakam ve alt çizgi (_) kullanılabilir.</div>
+    ${authPhoneRowHtml('rf-phone-code', 'rf-phone', 'Telefon', '', '+90')}
+    ${authSelectHtml('rf-city', 'Şehir', 'pin', TURKISH_CITIES, '', 'Şehir seç')}
+    ${authInputHtml('rf-email', 'E-posta *', 'text', 'ornek@gmail.com', 'mail')}
     ${authInputHtml('rf-password', 'Şifre *', 'password', 'En az 6 karakter', 'lock')}
+    <div style="font-size:12.5px;font-weight:600;color:var(--text-soft);margin-top:6px;padding:0 6px;">Şifre en az bir büyük harf, bir küçük harf ve bir rakam içermeli.</div>
   `;
 }
 
@@ -970,6 +1082,7 @@ function loginErrorMessage(e) {
     'auth/email-already-in-use': 'Bu e-posta zaten kayıtlı.',
     'auth/weak-password': 'Şifre en az 6 karakter olmalı.',
     'auth/missing-password': 'Şifre girmelisin.',
+    'auth/too-many-requests': 'Çok fazla deneme yapıldı, birazdan tekrar dene.',
   };
   return map[e.code] || 'Bir hata oluştu: ' + e.message;
 }
@@ -993,20 +1106,49 @@ async function resetPassword() {
 
 async function submitRegister() {
   const name = document.getElementById('rf-name').value.trim();
-  const username = document.getElementById('rf-username').value.trim().replace(/^@/, '');
-  const phone = document.getElementById('rf-phone').value.trim();
-  const city = document.getElementById('rf-city').value.trim();
+  const username = document.getElementById('rf-username').value.trim().replace(/^@/, '').toLowerCase();
+  const phoneCode = document.getElementById('rf-phone-code').value;
+  const phoneNum = document.getElementById('rf-phone').value.trim();
+  const phone = phoneNum ? `${phoneCode} ${phoneNum}` : '';
+  const city = document.getElementById('rf-city').value;
   const email = document.getElementById('rf-email').value.trim();
   const password = document.getElementById('rf-password').value;
+
   if (!name || !email || !password) {
     authError = 'Ad soyad, e-posta ve şifre zorunludur.';
     render();
     return;
   }
+  if (username && !/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
+    authError = 'Kullanıcı adı sadece İngilizce harf, rakam ve alt çizgi içerebilir (en az 3 karakter).';
+    render();
+    return;
+  }
+  const emailDomain = (email.split('@')[1] || '').toLowerCase();
+  if (!ALLOWED_EMAIL_DOMAINS.includes(emailDomain)) {
+    authError = 'Lütfen bilinen bir e-posta sağlayıcısı kullan (Gmail, Hotmail, Outlook, Yahoo, iCloud vb.).';
+    render();
+    return;
+  }
+  if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{6,}$/.test(password)) {
+    authError = 'Şifre en az bir büyük harf, bir küçük harf ve bir rakam içermeli.';
+    render();
+    return;
+  }
+
   authBusy = true;
   authError = null;
   render();
   try {
+    if (username) {
+      const existing = await db.collection('users').where('username', '==', username).limit(1).get();
+      if (!existing.empty) {
+        authBusy = false;
+        authError = 'Bu kullanıcı adı alınmış, başka bir tane dene.';
+        render();
+        return;
+      }
+    }
     const cred = await auth.createUserWithEmailAndPassword(email, password);
     currentUser = cred.user;
     await db.collection('users').doc(cred.user.uid).set({
@@ -1019,9 +1161,10 @@ async function submitRegister() {
       muted: false,
       createdAt: firebase.firestore.FieldValue.serverTimestamp(),
     });
+    await cred.user.sendEmailVerification();
     await refreshCurrentUserProfile();
     authBusy = false;
-    toast('Kayıt tamamlandı, hoş geldin!');
+    toast('Kayıt tamamlandı! Doğrulama bağlantısı e-postana gönderildi.');
     render();
   } catch (e) {
     authBusy = false;
@@ -1052,11 +1195,24 @@ function moderationBannerHtml() {
 
 function openEditProfileForm() {
   const p = currentUserProfile || {};
+  const phoneParts = splitPhone(p.phone);
   const body = `
     <label class="field"><span class="field-label">Ad Soyad</span><input type="text" id="ep-name" value="${escapeHtml(p.displayName || '')}"></label>
-    <label class="field"><span class="field-label">Kullanıcı Adı</span><input type="text" id="ep-username" value="${escapeHtml(p.username || '')}" placeholder="Ör. mehmety34"></label>
-    <label class="field"><span class="field-label">Telefon</span><input type="text" id="ep-phone" value="${escapeHtml(p.phone || '')}"></label>
-    <label class="field"><span class="field-label">Şehir</span><input type="text" id="ep-city" value="${escapeHtml(p.city || '')}"></label>
+    <label class="field"><span class="field-label">Kullanıcı Adı</span><input type="text" id="ep-username" value="${escapeHtml(p.username || '')}" placeholder="Ör. mehmety34" oninput="this.value=this.value.replace(/[^a-zA-Z0-9_]/g,'').toLowerCase()"></label>
+    <label class="field"><span class="field-label">Telefon</span>
+      <div style="display:flex;gap:8px;">
+        <select id="ep-phone-code" style="flex:none;width:92px;">
+          ${COUNTRY_CODES.map((c) => `<option value="${c.code}" ${c.code === phoneParts.code ? 'selected' : ''}>${c.code}</option>`).join('')}
+        </select>
+        <input type="tel" id="ep-phone" value="${escapeHtml(phoneParts.number)}" style="flex:1;" oninput="this.value=this.value.replace(/[^0-9 ]/g,'')">
+      </div>
+    </label>
+    <label class="field"><span class="field-label">Şehir</span>
+      <select id="ep-city">
+        <option value="">Şehir seç</option>
+        ${TURKISH_CITIES.map((c) => `<option value="${escapeHtml(c)}" ${c === p.city ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('')}
+      </select>
+    </label>
     <button class="btn btn-primary" onclick="submitEditProfile()">Kaydet</button>
   `;
   openModal('Profili Düzenle', body);
@@ -1064,11 +1220,20 @@ function openEditProfileForm() {
 
 async function submitEditProfile() {
   const name = document.getElementById('ep-name').value.trim();
-  const username = document.getElementById('ep-username').value.trim().replace(/^@/, '');
-  const phone = document.getElementById('ep-phone').value.trim();
-  const city = document.getElementById('ep-city').value.trim();
+  const username = document.getElementById('ep-username').value.trim().replace(/^@/, '').toLowerCase();
+  const phoneCode = document.getElementById('ep-phone-code').value;
+  const phoneNum = document.getElementById('ep-phone').value.trim();
+  const phone = phoneNum ? `${phoneCode} ${phoneNum}` : '';
+  const city = document.getElementById('ep-city').value;
   if (!name) return alert('Ad soyad zorunludur.');
+  if (username && !/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
+    return alert('Kullanıcı adı sadece İngilizce harf, rakam ve alt çizgi içerebilir (en az 3 karakter).');
+  }
   try {
+    if (username && username !== (currentUserProfile && currentUserProfile.username)) {
+      const existing = await db.collection('users').where('username', '==', username).limit(1).get();
+      if (!existing.empty) return alert('Bu kullanıcı adı alınmış, başka bir tane dene.');
+    }
     await db.collection('users').doc(currentUser.uid).set(
       { displayName: name, username: username || null, phone: phone || null, city: city || null },
       { merge: true }
