@@ -1,0 +1,8 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "com.besicitakip.app",
+    "sha256_cert_fingerprints": ["FE:70:E0:9D:C0:D7:FE:DC:C8:B1:D9:3D:ED:39:3A:57:89:C5:CB:7A:6E:E4:E8:64:06:CE:9F:7A:15:4F:97:C6"]
+  }
+}]
