@@ -54,12 +54,12 @@ function cowIconSvg(size) {
 }
 
 let toastTimer = null;
-function toast(message) {
+function toast(message, duration) {
   const el = document.getElementById('toast');
   el.textContent = message;
   el.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+  toastTimer = setTimeout(() => el.classList.remove('show'), duration || 2200);
 }
 
 function confirmDialog(message) {
@@ -1611,8 +1611,8 @@ async function submitListingForm() {
 
     pendingListingPhotoBlob = null;
     closeModal();
-    toast('İlan yayınlandı');
     openListing(docRef.id);
+    toast('✓ İlan başarıyla yayınlandı', 3500);
   } catch (e) {
     alert('Hata: ' + e.message);
     btn.textContent = 'İlanı Yayınla';
@@ -1872,8 +1872,8 @@ async function submitPostForm() {
 
     pendingPostPhotoBlob = null;
     closeModal();
-    toast('Gönderi paylaşıldı');
     openPost(docRef.id);
+    toast('✓ Gönderi başarıyla paylaşıldı', 3500);
   } catch (e) {
     alert('Hata: ' + e.message);
     btn.textContent = 'Paylaş';
