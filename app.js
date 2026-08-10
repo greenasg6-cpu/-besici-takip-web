@@ -676,7 +676,16 @@ function moreBackButton() {
 function timeAgoOrDate(ts) {
   if (!ts) return '';
   const date = typeof ts.toDate === 'function' ? ts.toDate() : new Date(ts);
-  return formatDate(date.toISOString().slice(0, 10));
+  const diffMin = Math.floor((Date.now() - date.getTime()) / 60000);
+  if (diffMin < 1) return 'şimdi';
+  if (diffMin < 60) return `${diffMin}dk`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour}h`;
+  const diffDay = Math.floor(diffHour / 24);
+  if (diffDay < 7) return `${diffDay}g`;
+  const diffWeek = Math.floor(diffDay / 7);
+  if (diffWeek < 5) return `${diffWeek}w`;
+  return date.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: '2-digit' });
 }
 
 function resizeImageToBlob(file, maxDim, quality) {
@@ -1720,21 +1729,25 @@ async function renderPostDetail(root, id) {
         ${
           comments.length
             ? comments
-                .map(
-                  (c) => `
-          <div class="list-row">
-            <div class="body">
-              <div class="title">${escapeHtml(c.authorName || '')}</div>
-              <div class="subtitle">${timeAgoOrDate(c.createdAt)}</div>
-              <div class="note" style="font-style:normal;margin-top:4px;">${escapeHtml(c.body)}</div>
+                .map((c) => {
+                  const cInitials = (c.authorName || '?').trim().slice(0, 2).toUpperCase();
+                  return `
+          <div class="list-row" style="align-items:flex-start;gap:10px;">
+            <div class="avatar-initials" style="width:34px;height:34px;font-size:12px;flex:none;background:var(--sage-light);color:var(--sage-dark);">${escapeHtml(cInitials)}</div>
+            <div class="body" style="flex:1;min-width:0;">
+              <div style="display:flex;align-items:baseline;gap:8px;">
+                <div class="title" style="font-size:14px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(c.authorName || '')}</div>
+                <div style="font-size:12px;font-weight:600;color:var(--faint);flex:none;">${timeAgoOrDate(c.createdAt)}</div>
+              </div>
+              <div class="note" style="font-style:normal;margin-top:3px;">${escapeHtml(c.body)}</div>
             </div>
             ${
               (currentUser && c.authorId === currentUser.uid) || isAdminUser
                 ? `<button class="delete-btn" onclick="confirmDeleteComment('${id}','${c.id}')">🗑</button>`
                 : ''
             }
-          </div>`
-                )
+          </div>`;
+                })
                 .join('')
             : '<div class="empty-state">Henüz yorum yok</div>'
         }
