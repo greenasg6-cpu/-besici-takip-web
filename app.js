@@ -710,7 +710,10 @@ function resizeImageToBlob(file, maxDim, quality) {
 
 async function uploadPhoto(path, blob) {
   const ref = storage.ref(path);
-  await ref.put(blob);
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Fotoğraf yüklenemedi (zaman aşımı). İnternetini kontrol et veya fotoğrafsız devam et.')), 20000)
+  );
+  await Promise.race([ref.put(blob), timeout]);
   return ref.getDownloadURL();
 }
 
